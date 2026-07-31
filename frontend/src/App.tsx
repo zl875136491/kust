@@ -1,0 +1,52 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { AppLayout } from './components/AppLayout';
+import { LiquidGlassSystem } from './components/LiquidGlassSystem';
+import { ToastProvider } from './components/ui';
+import { DataProvider } from './data-context';
+import { HomePage } from './pages/HomePage';
+import { MapPage } from './pages/MapPage';
+import { NotFoundPage } from './pages/NotFoundPage';
+import { NotificationsPage } from './pages/NotificationsPage';
+import { OverviewPage } from './pages/OverviewPage';
+import { ResourcePage } from './pages/ResourcePage';
+import { SettingsPage } from './pages/SettingsPage';
+import { WorkloadsPage } from './pages/WorkloadsPage';
+import { ThemeProvider } from './theme-context';
+import { VisualEffectsProvider } from './visual-effects-context';
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { staleTime: 15_000, retry: 1, refetchOnWindowFocus: false },
+  },
+});
+
+export default function App() {
+  return (
+    <ThemeProvider>
+      <VisualEffectsProvider>
+        <LiquidGlassSystem />
+        <QueryClientProvider client={queryClient}>
+          <DataProvider>
+            <ToastProvider>
+              <BrowserRouter>
+                <Routes>
+                  <Route element={<AppLayout />}>
+                    <Route index element={<HomePage />} />
+                    <Route path="notifications" element={<NotificationsPage />} />
+                    <Route path="settings" element={<SettingsPage />} />
+                    <Route path="cluster/:clusterId" element={<OverviewPage />} />
+                    <Route path="cluster/:clusterId/map" element={<MapPage />} />
+                    <Route path="cluster/:clusterId/workloads" element={<WorkloadsPage />} />
+                    <Route path="cluster/:clusterId/resources/:kind" element={<ResourcePage />} />
+                    <Route path="*" element={<NotFoundPage />} />
+                  </Route>
+                </Routes>
+              </BrowserRouter>
+            </ToastProvider>
+          </DataProvider>
+        </QueryClientProvider>
+      </VisualEffectsProvider>
+    </ThemeProvider>
+  );
+}
