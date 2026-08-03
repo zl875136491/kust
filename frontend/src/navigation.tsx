@@ -4,6 +4,7 @@ import {
   Hexagon,
   Map as MapIcon,
   Network,
+  Route,
   Settings2,
   ShieldCheck,
 } from 'lucide-react';
@@ -56,6 +57,16 @@ export const navigationGroups: NavigationGroup[] = [
       { kind: 'endpointslices', label: 'Endpoint Slices', singular: 'EndpointSlice', namespaced: true, group: 'network' },
       { kind: 'ingresses', label: 'Ingresses', singular: 'Ingress', namespaced: true, group: 'network' },
       { kind: 'networkpolicies', label: 'Network Policies', singular: 'NetworkPolicy', namespaced: true, group: 'network' },
+    ],
+  },
+  {
+    id: 'gateway', label: 'Gateway API', icon: Route,
+    items: [
+      { kind: 'httproutes', label: 'HTTPRoutes', singular: 'HTTPRoute', namespaced: true, group: 'gateway' },
+      { kind: 'gateways', label: 'Gateways', singular: 'Gateway', namespaced: true, group: 'gateway' },
+      { kind: 'gatewayclasses', label: 'Gateway Classes', singular: 'GatewayClass', namespaced: false, group: 'gateway' },
+      { kind: 'referencegrants', label: 'Reference Grants', singular: 'ReferenceGrant', namespaced: true, group: 'gateway' },
+      { kind: 'grpcroutes', label: 'GRPCRoutes', singular: 'GRPCRoute', namespaced: true, group: 'gateway' },
     ],
   },
   {

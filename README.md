@@ -17,10 +17,12 @@ Kust 是一个前后端分离的 Kubernetes 多集群管理控制台。产品结
 - Workloads：Pods、Deployments、StatefulSets、DaemonSets、ReplicaSets、Jobs、CronJobs
 - Storage：PVC、PV、StorageClass
 - Network：Service、Endpoints、EndpointSlice、Ingress、NetworkPolicy
+- Gateway API：HTTPRoute、Gateway、GatewayClass、ReferenceGrant、GRPCRoute
 - Security：ServiceAccount、Role、RoleBinding、ClusterRole、ClusterRoleBinding
 - Config：ConfigMap、Secret
 - 资源详情、标签与元数据、YAML 查看/更新、批量删除
 - Pod 日志、Deployment 扩缩容、Server-Side Apply
+- Pod WebShell（xterm.js + Kubernetes exec）与 WebFile（Monaco Editor，支持目录、读取、保存、删除）
 - 资源关系地图、通知中心、全局搜索
 - 演示数据与实时后端模式
 
@@ -91,6 +93,10 @@ Vite 会把 `/api` 代理到 `http://127.0.0.1:8080`。
 | `GET/DELETE` | `/api/clusters/:id/resources/:kind/:namespace/:name` | 读取 YAML 或删除资源 |
 | `PATCH` | `/api/clusters/:id/deployments/:namespace/:name/scale` | Deployment 扩缩容 |
 | `GET` | `/api/clusters/:id/pods/:namespace/:name/logs` | Pod 日志 |
+| `GET` | `/api/clusters/:id/pods/:namespace/:name/shell` | Pod WebSocket 终端 |
+| `GET` | `/api/clusters/:id/pods/:namespace/:name/files` | Pod 文件目录 |
+| `GET/PUT/DELETE` | `/api/clusters/:id/pods/:namespace/:name/file` | 读取、写入或删除 Pod 文件 |
+| `POST` | `/api/clusters/:id/pods/:namespace/:name/directory` | 创建 Pod 目录 |
 | `POST` | `/api/clusters/:id/apply` | Server-Side Apply YAML |
 
 ## 验证

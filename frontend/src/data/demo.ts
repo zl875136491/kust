@@ -195,6 +195,23 @@ export const demoResources: Record<string, ResourceRow[]> = {
   rolebindings: [resource('RoleBinding', 'developers-pod-reader', 'commerce', 'Active', { details: { role: 'pod-reader', subjects: 1 } })],
   clusterroles: [resource('ClusterRole', 'platform-observer', undefined, 'Active', { details: { rules: 8 } })],
   clusterrolebindings: [resource('ClusterRoleBinding', 'platform-observers', undefined, 'Active', { details: { role: 'platform-observer', subjects: 1 } })],
+  httproutes: [
+    resource('HTTPRoute', 'checkout-public', 'commerce', 'Accepted', {
+      ready: '2 rules',
+      details: { hostnames: ['shop.example.cn'], parentRefs: [{ name: 'public-gateway' }], rules: 2, conditions: [{ type: 'Accepted', status: 'True' }] },
+    }),
+    resource('HTTPRoute', 'grafana-internal', 'observability', 'Accepted', {
+      ready: '1 rule',
+      details: { hostnames: ['grafana.ops.example.cn'], parentRefs: [{ name: 'internal-gateway' }], rules: 1, conditions: [{ type: 'Accepted', status: 'True' }] },
+    }),
+  ],
+  gateways: [
+    resource('Gateway', 'public-gateway', 'commerce', 'Accepted', { details: { gatewayClassName: 'traefik', listeners: 2 } }),
+    resource('Gateway', 'internal-gateway', 'observability', 'Accepted', { details: { gatewayClassName: 'traefik', listeners: 1 } }),
+  ],
+  gatewayclasses: [resource('GatewayClass', 'traefik', undefined, 'Accepted', { details: { controllerName: 'traefik.io/gateway-controller' } })],
+  referencegrants: [resource('ReferenceGrant', 'commerce-to-payments', 'commerce', 'Active', { details: { from: 1, to: 1 } })],
+  grpcroutes: [resource('GRPCRoute', 'checkout-grpc', 'commerce', 'Accepted', { ready: '1 rule', details: { hostnames: ['checkout.grpc.example.cn'], rules: 1 } })],
   events,
 };
 

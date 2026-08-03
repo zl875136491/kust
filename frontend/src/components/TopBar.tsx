@@ -13,6 +13,8 @@ function getPageTitle(pathname: string, cluster?: Cluster) {
   if (pathname === '/settings') return '设置';
   const resourceKind = pathname.match(/\/resources\/([^/]+)/)?.[1];
   if (resourceKind) return resourceDescriptors[resourceKind]?.label || resourceKind;
+  if (pathname.endsWith('/shell')) return 'WebShell';
+  if (pathname.endsWith('/files')) return 'WebFile';
   if (pathname.endsWith('/map')) return '资源地图';
   if (pathname.endsWith('/workloads')) return '工作负载';
   if (cluster) return '概览';

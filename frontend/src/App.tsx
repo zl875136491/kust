@@ -12,6 +12,8 @@ import { OverviewPage } from './pages/OverviewPage';
 import { ResourcePage } from './pages/ResourcePage';
 import { SettingsPage } from './pages/SettingsPage';
 import { WorkloadsPage } from './pages/WorkloadsPage';
+import { WebFilePage } from './pages/WebFilePage';
+import { WebShellPage } from './pages/WebShellPage';
 import { ThemeProvider } from './theme-context';
 import { VisualEffectsProvider } from './visual-effects-context';
 
@@ -39,6 +41,8 @@ export default function App() {
                     <Route path="cluster/:clusterId/map" element={<MapPage />} />
                     <Route path="cluster/:clusterId/workloads" element={<WorkloadsPage />} />
                     <Route path="cluster/:clusterId/resources/:kind" element={<ResourcePage />} />
+                    <Route path="cluster/:clusterId/pods/:namespace/:pod/shell" element={<WebShellPage />} />
+                    <Route path="cluster/:clusterId/pods/:namespace/:pod/files" element={<WebFilePage />} />
                     <Route path="*" element={<NotFoundPage />} />
                   </Route>
                 </Routes>

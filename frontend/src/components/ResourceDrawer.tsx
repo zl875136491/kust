@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { Braces, Copy, FileText, Layers3, Logs, Scale, Trash2, X } from 'lucide-react';
+import { Braces, Copy, FileText, FolderOpen, Layers3, Logs, Scale, TerminalSquare, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { stringify } from 'yaml';
 import { useData } from '../data-context';
 import { motionDuration, useEscapeLayer } from '../hooks/useEscapeLayer';
@@ -38,6 +39,7 @@ export function ResourceDrawer({
   onClose: () => void;
 }) {
   const { deleteResource, getResourceYaml, scaleDeployment, getPodLogs, applyYaml } = useData();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { pushToast } = useToast();
   const [tab, setTab] = useState<'overview' | 'yaml' | 'logs'>('overview');
@@ -56,6 +58,9 @@ export function ResourceDrawer({
   const closeTimer = useRef<number | undefined>(undefined);
   const row = localRow?.uid === sourceRow?.uid ? localRow : sourceRow;
   const dirty = yaml !== savedYaml;
+  const podContainer = row?.kind === 'Pod' && Array.isArray(row.details.containers)
+    ? String(row.details.containers[0] || '') || undefined
+    : undefined;
 
   const beginClose = () => {
     if (closing) return;
@@ -190,6 +195,8 @@ export function ResourceDrawer({
         <div className="drawer__status"><StatusPill status={row.status} />{row.namespace && <span>{row.namespace}</span>}{row.ready && <span>{row.ready} 就绪</span>}</div>
         <div className="drawer__actions">
           {row.kind === 'Pod' && <Button variant="secondary" aria-label="查看日志" icon={<Logs size={16} />} onClick={() => { setTab('logs'); void loadLogs(); }}>日志</Button>}
+          {row.kind === 'Pod' && row.namespace && <Button variant="secondary" aria-label="打开终端" icon={<TerminalSquare size={16} />} onClick={() => navigate(`/cluster/${clusterId}/pods/${encodeURIComponent(row.namespace!)}/${encodeURIComponent(row.name)}/shell${podContainer ? `?container=${encodeURIComponent(podContainer)}` : ''}`)}>终端</Button>}
+          {row.kind === 'Pod' && row.namespace && <Button variant="secondary" aria-label="打开文件" icon={<FolderOpen size={16} />} onClick={() => navigate(`/cluster/${clusterId}/pods/${encodeURIComponent(row.namespace!)}/${encodeURIComponent(row.name)}/files${podContainer ? `?container=${encodeURIComponent(podContainer)}` : ''}`)}>文件</Button>}
           {row.kind === 'Deployment' && <Button variant="secondary" aria-label="扩缩容" icon={<Scale size={16} />} onClick={() => { setReplicas(savedReplicas); setScaleOpen(true); }}>扩缩容</Button>}
           <Button variant="secondary" aria-label="复制 YAML" icon={<Copy size={16} />} onClick={() => { void navigator.clipboard.writeText(yaml); pushToast('YAML 已复制'); }}>复制</Button>
           <Button variant="danger" aria-label="删除资源" icon={<Trash2 size={16} />} onClick={() => setDeleteOpen(true)}>删除</Button>

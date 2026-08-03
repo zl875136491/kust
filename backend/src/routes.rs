@@ -1,14 +1,18 @@
 use std::time::Duration;
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        Path, Query, State,
+    },
     http::{header::CONTENT_TYPE, HeaderValue, Method, StatusCode},
     response::IntoResponse,
     routing::{delete, get, patch},
     Json, Router,
 };
-use futures::TryStreamExt;
+use futures::{SinkExt, TryStreamExt};
 use mongodb::bson::{doc, oid::ObjectId, DateTime};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tower_http::{
     cors::CorsLayer,
     trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer},
@@ -62,6 +66,22 @@ pub fn router(state: SharedState, config: &AppConfig) -> Result<Router, AppError
         .route(
             "/api/clusters/{cluster_id}/pods/{namespace}/{name}/logs",
             get(pod_logs),
+        )
+        .route(
+            "/api/clusters/{cluster_id}/pods/{namespace}/{name}/files",
+            get(file_tree),
+        )
+        .route(
+            "/api/clusters/{cluster_id}/pods/{namespace}/{name}/file",
+            get(read_file).put(write_file).delete(delete_file),
+        )
+        .route(
+            "/api/clusters/{cluster_id}/pods/{namespace}/{name}/directory",
+            axum::routing::post(make_directory),
+        )
+        .route(
+            "/api/clusters/{cluster_id}/pods/{namespace}/{name}/shell",
+            get(shell),
         )
         .route(
             "/api/clusters/{cluster_id}/apply",
@@ -263,4 +283,145 @@ async fn apply_yaml(
     let response =
         kubernetes::apply_yaml(client, &request.yaml, request.namespace.as_deref()).await?;
     Ok((StatusCode::CREATED, Json(response)))
+}
+
+async fn file_tree(
+    State(state): State<SharedState>,
+    Path((cluster_id, namespace, name)): Path<(String, String, String)>,
+    Query(query): Query<crate::models::FileQuery>,
+) -> Result<impl IntoResponse, AppError> {
+    let client = state.kube_client(&cluster_id).await?;
+    Ok(Json(
+        kubernetes::pod_file_tree(client, &namespace, &name, &query.path, query.container).await?,
+    ))
+}
+
+async fn read_file(
+    State(state): State<SharedState>,
+    Path((cluster_id, namespace, name)): Path<(String, String, String)>,
+    Query(query): Query<crate::models::FileQuery>,
+) -> Result<impl IntoResponse, AppError> {
+    let client = state.kube_client(&cluster_id).await?;
+    Ok(Json(
+        kubernetes::pod_read_file(client, &namespace, &name, &query.path, query.container).await?,
+    ))
+}
+
+async fn write_file(
+    State(state): State<SharedState>,
+    Path((cluster_id, namespace, name)): Path<(String, String, String)>,
+    Json(request): Json<crate::models::FileWriteRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let client = state.kube_client(&cluster_id).await?;
+    let bytes = kubernetes::pod_write_file(
+        client,
+        &namespace,
+        &name,
+        &request.path,
+        &request.content,
+        request.container,
+    )
+    .await?;
+    Ok(Json(
+        serde_json::json!({ "path": request.path, "bytes": bytes }),
+    ))
+}
+
+async fn make_directory(
+    State(state): State<SharedState>,
+    Path((cluster_id, namespace, name)): Path<(String, String, String)>,
+    Json(request): Json<crate::models::DirectoryRequest>,
+) -> Result<StatusCode, AppError> {
+    let client = state.kube_client(&cluster_id).await?;
+    kubernetes::pod_make_directory(client, &namespace, &name, &request.path, request.container)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn delete_file(
+    State(state): State<SharedState>,
+    Path((cluster_id, namespace, name)): Path<(String, String, String)>,
+    Query(query): Query<crate::models::FileQuery>,
+) -> Result<StatusCode, AppError> {
+    let client = state.kube_client(&cluster_id).await?;
+    kubernetes::pod_delete_file(client, &namespace, &name, &query.path, query.container).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn shell(
+    State(state): State<SharedState>,
+    Path((cluster_id, namespace, name)): Path<(String, String, String)>,
+    Query(query): Query<crate::models::ShellQuery>,
+    upgrade: WebSocketUpgrade,
+) -> Result<impl IntoResponse, AppError> {
+    let client = state.kube_client(&cluster_id).await?;
+    Ok(upgrade.on_upgrade(move |socket| async move {
+        if let Err(error) = stream_shell(socket, client, namespace, name, query.container).await {
+            tracing::warn!(%error, "pod shell session ended");
+        }
+    }))
+}
+
+async fn stream_shell(
+    mut socket: WebSocket,
+    client: kube::Client,
+    namespace: String,
+    pod: String,
+    container: Option<String>,
+) -> Result<(), AppError> {
+    let mut process = kubernetes::pod_shell(client, &namespace, &pod, container).await?;
+    let mut stdin = process
+        .stdin()
+        .ok_or_else(|| AppError::internal("pod shell did not provide stdin"))?;
+    let mut stdout = process
+        .stdout()
+        .ok_or_else(|| AppError::internal("pod shell did not provide stdout"))?;
+    let mut terminal_size = process.terminal_size();
+    let mut output = [0_u8; 8192];
+    loop {
+        tokio::select! {
+            message = socket.recv() => {
+                let Some(message) = message else { break };
+                let message = message.map_err(|error| AppError::upstream(format!("shell websocket failed: {error}")))?;
+                match message {
+                    Message::Text(text) => {
+                        let payload: serde_json::Value = serde_json::from_str(&text)
+                            .map_err(|error| AppError::bad_request(format!("shell message is invalid: {error}")))?;
+                        match payload.get("type").and_then(serde_json::Value::as_str) {
+                            Some("input") => {
+                                if let Some(data) = payload.get("data").and_then(serde_json::Value::as_str) {
+                                    stdin.write_all(data.as_bytes()).await.map_err(|error| AppError::upstream(format!("unable to write shell input: {error}")))?;
+                                }
+                            }
+                            Some("resize") => {
+                                if let (Some(cols), Some(rows)) = (
+                                    payload.get("cols").and_then(serde_json::Value::as_u64),
+                                    payload.get("rows").and_then(serde_json::Value::as_u64),
+                                ) {
+                                    if let Some(sender) = terminal_size.as_mut() {
+                                        sender.send(kube::api::TerminalSize {
+                                            width: cols.min(u16::MAX as u64) as u16,
+                                            height: rows.min(u16::MAX as u64) as u16,
+                                        }).await.map_err(|error| AppError::upstream(format!("unable to resize shell: {error}")))?;
+                                    }
+                                }
+                            }
+                            Some("close") => break,
+                            _ => {}
+                        }
+                    }
+                    Message::Close(_) => break,
+                    _ => {}
+                }
+            }
+            read = stdout.read(&mut output) => {
+                let read = read.map_err(|error| AppError::upstream(format!("unable to read shell output: {error}")))?;
+                if read == 0 { break; }
+                socket.send(Message::Text(String::from_utf8_lossy(&output[..read]).to_string().into())).await
+                    .map_err(|error| AppError::upstream(format!("shell websocket failed: {error}")))?;
+            }
+        }
+    }
+    process.abort();
+    Ok(())
 }

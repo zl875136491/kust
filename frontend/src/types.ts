@@ -62,3 +62,17 @@ export interface ResourceDescriptor {
   namespaced: boolean;
   group: string;
 }
+
+export interface FileEntry {
+  name: string;
+  path: string;
+  kind: 'file' | 'directory' | 'symlink';
+  size?: number;
+  mode?: string;
+  modifiedAt?: string;
+}
+
+export interface FileTreeResponse {
+  path: string;
+  entries: FileEntry[];
+}

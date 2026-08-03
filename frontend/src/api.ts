@@ -4,9 +4,13 @@ import type {
   Overview,
   ResourceListResponse,
   ResourceRow,
+  FileTreeResponse,
 } from './types';
 
 const API_ROOT = import.meta.env.VITE_API_URL || '/api';
+const WS_ROOT = API_ROOT.startsWith('http')
+  ? API_ROOT.replace(/^http/, 'ws')
+  : (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host + API_ROOT;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_ROOT}${path}`, {
@@ -63,4 +67,40 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ yaml, namespace }),
     }),
+  fileTree: (clusterId: string, namespace: string, pod: string, path = '/', container?: string) => {
+    const query = new URLSearchParams({ path });
+    if (container) query.set('container', container);
+    return request<FileTreeResponse>(
+      '/clusters/' + clusterId + '/pods/' + encodeURIComponent(namespace) + '/' + encodeURIComponent(pod) + '/files?' + query.toString(),
+    );
+  },
+  readFile: (clusterId: string, namespace: string, pod: string, path: string, container?: string) => {
+    const query = new URLSearchParams({ path });
+    if (container) query.set('container', container);
+    return request<{ path: string; content: string; truncated: boolean }>(
+      '/clusters/' + clusterId + '/pods/' + encodeURIComponent(namespace) + '/' + encodeURIComponent(pod) + '/file?' + query.toString(),
+    );
+  },
+  writeFile: (clusterId: string, namespace: string, pod: string, path: string, content: string, container?: string) =>
+    request<{ path: string; bytes: number }>(
+      '/clusters/' + clusterId + '/pods/' + encodeURIComponent(namespace) + '/' + encodeURIComponent(pod) + '/file',
+      { method: 'PUT', body: JSON.stringify({ path, content, container }) },
+    ),
+  makeDirectory: (clusterId: string, namespace: string, pod: string, path: string, container?: string) =>
+    request<void>(
+      '/clusters/' + clusterId + '/pods/' + encodeURIComponent(namespace) + '/' + encodeURIComponent(pod) + '/directory',
+      { method: 'POST', body: JSON.stringify({ path, container }) },
+    ),
+  deleteFile: (clusterId: string, namespace: string, pod: string, path: string, container?: string) => {
+    const query = new URLSearchParams({ path });
+    if (container) query.set('container', container);
+    return request<void>(
+      '/clusters/' + clusterId + '/pods/' + encodeURIComponent(namespace) + '/' + encodeURIComponent(pod) + '/file?' + query.toString(),
+      { method: 'DELETE' },
+    );
+  },
+  shellUrl: (clusterId: string, namespace: string, pod: string, container?: string) => {
+    const query = container ? '?container=' + encodeURIComponent(container) : '';
+    return WS_ROOT + '/clusters/' + clusterId + '/pods/' + encodeURIComponent(namespace) + '/' + encodeURIComponent(pod) + '/shell' + query;
+  },
 };

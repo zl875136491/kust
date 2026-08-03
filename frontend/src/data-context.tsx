@@ -43,6 +43,8 @@ const pluralByKind: Record<string, string> = {
   ReplicaSet: 'replicasets', Job: 'jobs', CronJob: 'cronjobs', Service: 'services',
   Ingress: 'ingresses', ConfigMap: 'configmaps', Secret: 'secrets', Namespace: 'namespaces',
   NetworkPolicy: 'networkpolicies', PersistentVolumeClaim: 'persistentvolumeclaims',
+  HTTPRoute: 'httproutes', Gateway: 'gateways', GatewayClass: 'gatewayclasses',
+  ReferenceGrant: 'referencegrants', GRPCRoute: 'grpcroutes',
 };
 
 export function DataProvider({ children }: { children: React.ReactNode }) {

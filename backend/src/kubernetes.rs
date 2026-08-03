@@ -13,13 +13,14 @@ use k8s_openapi::api::{
     storage::v1::StorageClass,
 };
 use kube::{
-    api::{DeleteParams, ListParams, LogParams, Patch, PatchParams},
+    api::{AttachParams, DeleteParams, ListParams, LogParams, Patch, PatchParams},
     core::{ClusterResourceScope, DynamicObject, GroupVersionKind, NamespaceResourceScope},
     discovery::{Discovery, Scope},
     Api, Client, Resource, ResourceExt,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::{
     error::AppError,
@@ -430,6 +431,94 @@ where
     row
 }
 
+fn dynamic_row(item: &DynamicObject, kind: &str) -> ResourceRow {
+    let metadata = &item.metadata;
+    let conditions = item
+        .data
+        .get("status")
+        .and_then(|status| status.get("parents"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .flat_map(|parent| parent.get("conditions").and_then(Value::as_array))
+        .flatten()
+        .collect::<Vec<_>>();
+    let accepted = conditions.iter().any(|condition| {
+        condition.get("type").and_then(Value::as_str) == Some("Accepted")
+            && condition.get("status").and_then(Value::as_str) == Some("True")
+    });
+    let hostnames = item
+        .data
+        .get("spec")
+        .and_then(|spec| spec.get("hostnames"))
+        .cloned()
+        .unwrap_or_else(|| Value::Array(Vec::new()));
+    let parents = item
+        .data
+        .get("spec")
+        .and_then(|spec| spec.get("parentRefs"))
+        .cloned()
+        .unwrap_or_else(|| Value::Array(Vec::new()));
+    let rules = item
+        .data
+        .get("spec")
+        .and_then(|spec| spec.get("rules"))
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or_default();
+    ResourceRow {
+        uid: metadata
+            .uid
+            .clone()
+            .unwrap_or_else(|| format!("{kind}:{}", metadata.name.clone().unwrap_or_default())),
+        name: metadata.name.clone().unwrap_or_default(),
+        namespace: metadata.namespace.clone(),
+        kind: kind.into(),
+        status: if accepted { "Accepted" } else { "Pending" }.into(),
+        ready: Some(format!("{rules} rule{}", if rules == 1 { "" } else { "s" })),
+        restarts: None,
+        created_at: metadata
+            .creation_timestamp
+            .as_ref()
+            .map(|time| time.0.to_rfc3339()),
+        node: None,
+        labels: metadata.labels.clone().unwrap_or_default(),
+        details: json!({
+            "hostnames": hostnames,
+            "parentRefs": parents,
+            "rules": rules,
+            "conditions": conditions,
+        }),
+    }
+}
+
+async fn list_dynamic(
+    client: Client,
+    gvk: &GroupVersionKind,
+    namespace: Option<&str>,
+    params: &ListParams,
+    display_kind: &str,
+) -> Result<Vec<ResourceRow>, AppError> {
+    let discovery = Discovery::new(client.clone()).run().await?;
+    let (resource, capabilities) = discovery.resolve_gvk(gvk).ok_or_else(|| {
+        AppError::bad_request(format!("the cluster does not expose {display_kind}"))
+    })?;
+    let api: Api<DynamicObject> = if capabilities.scope == Scope::Cluster {
+        Api::all_with(client, &resource)
+    } else {
+        match namespace.filter(|value| !value.is_empty() && *value != "all") {
+            Some(namespace) => Api::namespaced_with(client, namespace, &resource),
+            None => Api::all_with(client, &resource),
+        }
+    };
+    Ok(api
+        .list(params)
+        .await?
+        .iter()
+        .map(|item| dynamic_row(item, display_kind))
+        .collect())
+}
+
 pub async fn list_resources(
     client: Client,
     kind: &str,
@@ -455,6 +544,61 @@ pub async fn list_resources(
         "persistentvolumeclaims" => ("PersistentVolumeClaim", list_namespaced::<PersistentVolumeClaim, _>(client, namespace, &params, pvc_row).await?),
         "persistentvolumes" => ("PersistentVolume", list_cluster::<PersistentVolume, _>(client, &params, pv_row).await?),
         "events" => ("Event", list_namespaced::<Event, _>(client, namespace, &params, event_row).await?),
+        "httproutes" => (
+            "HTTPRoute",
+            list_dynamic(
+                client,
+                &GroupVersionKind::gvk("gateway.networking.k8s.io", "v1", "HTTPRoute"),
+                namespace,
+                &params,
+                "HTTPRoute",
+            )
+            .await?,
+        ),
+        "gateways" => (
+            "Gateway",
+            list_dynamic(
+                client,
+                &GroupVersionKind::gvk("gateway.networking.k8s.io", "v1", "Gateway"),
+                namespace,
+                &params,
+                "Gateway",
+            )
+            .await?,
+        ),
+        "gatewayclasses" => (
+            "GatewayClass",
+            list_dynamic(
+                client,
+                &GroupVersionKind::gvk("gateway.networking.k8s.io", "v1", "GatewayClass"),
+                namespace,
+                &params,
+                "GatewayClass",
+            )
+            .await?,
+        ),
+        "referencegrants" => (
+            "ReferenceGrant",
+            list_dynamic(
+                client,
+                &GroupVersionKind::gvk("gateway.networking.k8s.io", "v1beta1", "ReferenceGrant"),
+                namespace,
+                &params,
+                "ReferenceGrant",
+            )
+            .await?,
+        ),
+        "grpcroutes" => (
+            "GRPCRoute",
+            list_dynamic(
+                client,
+                &GroupVersionKind::gvk("gateway.networking.k8s.io", "v1", "GRPCRoute"),
+                namespace,
+                &params,
+                "GRPCRoute",
+            )
+            .await?,
+        ),
         "endpoints" => ("Endpoints", list_namespaced::<Endpoints, _>(client, namespace, &params, |item| {
             let addresses = item.subsets.as_ref().map(|subsets| subsets.iter().map(|subset| subset.addresses.as_ref().map(Vec::len).unwrap_or(0)).sum::<usize>()).unwrap_or(0);
             generic_row(item, "Endpoints", "Active", json!({ "addresses": addresses }))
@@ -561,6 +705,28 @@ where
     Ok(())
 }
 
+async fn delete_dynamic(
+    client: Client,
+    gvk: &GroupVersionKind,
+    namespace: Option<&str>,
+    name: &str,
+) -> Result<(), AppError> {
+    let discovery = Discovery::new(client.clone()).run().await?;
+    let (resource, capabilities) = discovery.resolve_gvk(gvk).ok_or_else(|| {
+        AppError::bad_request(format!("the cluster does not expose {}", gvk.kind))
+    })?;
+    let api: Api<DynamicObject> = if capabilities.scope == Scope::Cluster {
+        Api::all_with(client, &resource)
+    } else {
+        let namespace = namespace
+            .filter(|value| !value.is_empty() && *value != "all")
+            .ok_or_else(|| AppError::bad_request("namespace is required for this resource"))?;
+        Api::namespaced_with(client, namespace, &resource)
+    };
+    api.delete(name, &DeleteParams::default()).await?;
+    Ok(())
+}
+
 pub async fn delete_resource(
     client: Client,
     kind: &str,
@@ -568,36 +734,89 @@ pub async fn delete_resource(
     name: &str,
 ) -> Result<(), AppError> {
     let normalized = kind.to_ascii_lowercase().replace(['-', '_'], "");
-    let namespace = || {
+    let required_namespace = || {
         namespace
             .filter(|value| !value.is_empty() && *value != "all")
             .ok_or_else(|| AppError::bad_request("namespace is required for this resource"))
     };
     match normalized.as_str() {
-        "pods" => delete_namespaced::<Pod>(client, namespace()?, name).await,
-        "deployments" => delete_namespaced::<Deployment>(client, namespace()?, name).await,
-        "statefulsets" => delete_namespaced::<StatefulSet>(client, namespace()?, name).await,
-        "daemonsets" => delete_namespaced::<DaemonSet>(client, namespace()?, name).await,
-        "replicasets" => delete_namespaced::<ReplicaSet>(client, namespace()?, name).await,
-        "jobs" => delete_namespaced::<Job>(client, namespace()?, name).await,
-        "cronjobs" => delete_namespaced::<CronJob>(client, namespace()?, name).await,
-        "services" => delete_namespaced::<Service>(client, namespace()?, name).await,
-        "ingresses" => delete_namespaced::<Ingress>(client, namespace()?, name).await,
-        "configmaps" => delete_namespaced::<ConfigMap>(client, namespace()?, name).await,
-        "secrets" => delete_namespaced::<Secret>(client, namespace()?, name).await,
-        "persistentvolumeclaims" => {
-            delete_namespaced::<PersistentVolumeClaim>(client, namespace()?, name).await
+        "pods" => delete_namespaced::<Pod>(client, required_namespace()?, name).await,
+        "deployments" => delete_namespaced::<Deployment>(client, required_namespace()?, name).await,
+        "statefulsets" => {
+            delete_namespaced::<StatefulSet>(client, required_namespace()?, name).await
         }
-        "networkpolicies" => delete_namespaced::<NetworkPolicy>(client, namespace()?, name).await,
-        "serviceaccounts" => delete_namespaced::<ServiceAccount>(client, namespace()?, name).await,
-        "roles" => delete_namespaced::<Role>(client, namespace()?, name).await,
-        "rolebindings" => delete_namespaced::<RoleBinding>(client, namespace()?, name).await,
+        "daemonsets" => delete_namespaced::<DaemonSet>(client, required_namespace()?, name).await,
+        "replicasets" => delete_namespaced::<ReplicaSet>(client, required_namespace()?, name).await,
+        "jobs" => delete_namespaced::<Job>(client, required_namespace()?, name).await,
+        "cronjobs" => delete_namespaced::<CronJob>(client, required_namespace()?, name).await,
+        "services" => delete_namespaced::<Service>(client, required_namespace()?, name).await,
+        "ingresses" => delete_namespaced::<Ingress>(client, required_namespace()?, name).await,
+        "configmaps" => delete_namespaced::<ConfigMap>(client, required_namespace()?, name).await,
+        "secrets" => delete_namespaced::<Secret>(client, required_namespace()?, name).await,
+        "persistentvolumeclaims" => {
+            delete_namespaced::<PersistentVolumeClaim>(client, required_namespace()?, name).await
+        }
+        "networkpolicies" => {
+            delete_namespaced::<NetworkPolicy>(client, required_namespace()?, name).await
+        }
+        "serviceaccounts" => {
+            delete_namespaced::<ServiceAccount>(client, required_namespace()?, name).await
+        }
+        "roles" => delete_namespaced::<Role>(client, required_namespace()?, name).await,
+        "rolebindings" => {
+            delete_namespaced::<RoleBinding>(client, required_namespace()?, name).await
+        }
         "nodes" => delete_cluster::<Node>(client, name).await,
         "namespaces" => delete_cluster::<Namespace>(client, name).await,
         "persistentvolumes" => delete_cluster::<PersistentVolume>(client, name).await,
         "storageclasses" => delete_cluster::<StorageClass>(client, name).await,
         "clusterroles" => delete_cluster::<ClusterRole>(client, name).await,
         "clusterrolebindings" => delete_cluster::<ClusterRoleBinding>(client, name).await,
+        "httproutes" => {
+            delete_dynamic(
+                client,
+                &GroupVersionKind::gvk("gateway.networking.k8s.io", "v1", "HTTPRoute"),
+                namespace,
+                name,
+            )
+            .await
+        }
+        "gateways" => {
+            delete_dynamic(
+                client,
+                &GroupVersionKind::gvk("gateway.networking.k8s.io", "v1", "Gateway"),
+                namespace,
+                name,
+            )
+            .await
+        }
+        "gatewayclasses" => {
+            delete_dynamic(
+                client,
+                &GroupVersionKind::gvk("gateway.networking.k8s.io", "v1", "GatewayClass"),
+                namespace,
+                name,
+            )
+            .await
+        }
+        "referencegrants" => {
+            delete_dynamic(
+                client,
+                &GroupVersionKind::gvk("gateway.networking.k8s.io", "v1beta1", "ReferenceGrant"),
+                namespace,
+                name,
+            )
+            .await
+        }
+        "grpcroutes" => {
+            delete_dynamic(
+                client,
+                &GroupVersionKind::gvk("gateway.networking.k8s.io", "v1", "GRPCRoute"),
+                namespace,
+                name,
+            )
+            .await
+        }
         _ => Err(AppError::bad_request(format!(
             "resource kind '{kind}' cannot be deleted"
         ))),
@@ -652,6 +871,302 @@ pub async fn pod_logs(
         .await?)
 }
 
+fn container_params(container: Option<String>, tty: bool) -> AttachParams {
+    let params = if tty {
+        AttachParams::interactive_tty()
+    } else {
+        AttachParams::default()
+            .stdin(true)
+            .stdout(true)
+            .stderr(true)
+    };
+    match container {
+        Some(value) => params.container(value),
+        None => params,
+    }
+}
+
+async fn exec_capture(
+    client: Client,
+    namespace: &str,
+    pod: &str,
+    command: Vec<String>,
+    container: Option<String>,
+    input: Option<&[u8]>,
+) -> Result<Vec<u8>, AppError> {
+    let api: Api<Pod> = Api::namespaced(client, namespace);
+    let mut attached = api
+        .exec(pod, command, &container_params(container, false))
+        .await
+        .map_err(AppError::from)?;
+    let stdout = attached
+        .stdout()
+        .ok_or_else(|| AppError::internal("pod exec did not provide stdout"))?;
+    let stderr = attached
+        .stderr()
+        .ok_or_else(|| AppError::internal("pod exec did not provide stderr"))?;
+    if let Some(input) = input {
+        let mut stdin = attached
+            .stdin()
+            .ok_or_else(|| AppError::internal("pod exec did not provide stdin"))?;
+        stdin
+            .write_all(input)
+            .await
+            .map_err(|error| AppError::upstream(format!("unable to write pod stdin: {error}")))?;
+        stdin
+            .shutdown()
+            .await
+            .map_err(|error| AppError::upstream(format!("unable to close pod stdin: {error}")))?;
+    }
+    let mut output = Vec::new();
+    let mut errors = Vec::new();
+    stdout
+        .take(4_000_001)
+        .read_to_end(&mut output)
+        .await
+        .map_err(|error| AppError::upstream(format!("unable to read pod stdout: {error}")))?;
+    stderr
+        .take(32_769)
+        .read_to_end(&mut errors)
+        .await
+        .map_err(|error| AppError::upstream(format!("unable to read pod stderr: {error}")))?;
+    attached
+        .join()
+        .await
+        .map_err(|error| AppError::upstream(format!("pod exec failed: {error}")))?;
+    if !errors.is_empty() {
+        let message = String::from_utf8_lossy(&errors).trim().to_string();
+        if !message.is_empty() {
+            return Err(AppError::upstream(message));
+        }
+    }
+    Ok(output)
+}
+
+fn normalized_file_path(path: &str) -> Result<String, AppError> {
+    if path.contains('\0') {
+        return Err(AppError::bad_request(
+            "file path contains an invalid character",
+        ));
+    }
+    let path = if path.trim().is_empty() {
+        "/"
+    } else {
+        path.trim()
+    };
+    let path = if path.starts_with('/') {
+        path.to_string()
+    } else {
+        format!("/{}", path)
+    };
+    if path.split('/').any(|segment| segment == "..") {
+        return Err(AppError::bad_request(
+            "parent path segments are not allowed",
+        ));
+    }
+    Ok(path)
+}
+
+pub async fn pod_file_tree(
+    client: Client,
+    namespace: &str,
+    pod: &str,
+    path: &str,
+    container: Option<String>,
+) -> Result<crate::models::FileTreeResponse, AppError> {
+    let path = normalized_file_path(path)?;
+    let script = r#"for entry in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+  [ -e "$entry" ] || [ -L "$entry" ] || continue
+  name=$(basename "$entry")
+  if [ -L "$entry" ]; then
+    printf 'l\t%s\t0\n' "$name"
+  elif [ -d "$entry" ]; then
+    printf 'd\t%s\t0\n' "$name"
+  else
+    size=$(wc -c < "$entry" 2>/dev/null || printf '0')
+    printf 'f\t%s\t%s\n' "$name" "$size"
+  fi
+done"#;
+    let output = exec_capture(
+        client,
+        namespace,
+        pod,
+        vec![
+            "sh".into(),
+            "-c".into(),
+            script.into(),
+            "kust-file-list".into(),
+            path.clone(),
+        ],
+        container,
+        None,
+    )
+    .await?;
+    let mut entries = String::from_utf8_lossy(&output)
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.splitn(3, '\t');
+            let kind = parts.next()?;
+            let name = parts.next()?.to_string();
+            let size = parts.next().and_then(|value| value.trim().parse().ok());
+            let entry_path = if path == "/" {
+                format!("/{name}")
+            } else {
+                format!("{}/{}", path.trim_end_matches('/'), name)
+            };
+            Some(crate::models::FileEntry {
+                name,
+                path: entry_path,
+                kind: match kind {
+                    "d" => "directory",
+                    "l" => "symlink",
+                    _ => "file",
+                }
+                .into(),
+                size,
+                mode: None,
+                modified_at: None,
+            })
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|entry| (entry.kind != "directory", entry.name.to_ascii_lowercase()));
+    Ok(crate::models::FileTreeResponse { path, entries })
+}
+
+pub async fn pod_read_file(
+    client: Client,
+    namespace: &str,
+    pod: &str,
+    path: &str,
+    container: Option<String>,
+) -> Result<crate::models::FileContentResponse, AppError> {
+    let path = normalized_file_path(path)?;
+    let output = exec_capture(
+        client,
+        namespace,
+        pod,
+        vec![
+            "sh".into(),
+            "-c".into(),
+            "cat -- \"$1\"".into(),
+            "kust-file-read".into(),
+            path.clone(),
+        ],
+        container,
+        None,
+    )
+    .await?;
+    let truncated = output.len() >= 4_000_001;
+    Ok(crate::models::FileContentResponse {
+        path,
+        content: String::from_utf8_lossy(&output[..output.len().min(4_000_000)]).into(),
+        truncated,
+    })
+}
+
+pub async fn pod_write_file(
+    client: Client,
+    namespace: &str,
+    pod: &str,
+    path: &str,
+    content: &str,
+    container: Option<String>,
+) -> Result<u64, AppError> {
+    let path = normalized_file_path(path)?;
+    if content.len() > 4_000_000 {
+        return Err(AppError::bad_request("file content is too large"));
+    }
+    exec_capture(
+        client,
+        namespace,
+        pod,
+        vec![
+            "sh".into(),
+            "-c".into(),
+            "mkdir -p \"$(dirname -- \"$1\")\" && cat > \"$1\"".into(),
+            "kust-file-write".into(),
+            path,
+        ],
+        container,
+        Some(content.as_bytes()),
+    )
+    .await?;
+    Ok(content.len() as u64)
+}
+
+pub async fn pod_make_directory(
+    client: Client,
+    namespace: &str,
+    pod: &str,
+    path: &str,
+    container: Option<String>,
+) -> Result<(), AppError> {
+    let path = normalized_file_path(path)?;
+    exec_capture(
+        client,
+        namespace,
+        pod,
+        vec![
+            "sh".into(),
+            "-c".into(),
+            "mkdir -p -- \"$1\"".into(),
+            "kust-file-mkdir".into(),
+            path,
+        ],
+        container,
+        None,
+    )
+    .await?;
+    Ok(())
+}
+
+pub async fn pod_delete_file(
+    client: Client,
+    namespace: &str,
+    pod: &str,
+    path: &str,
+    container: Option<String>,
+) -> Result<(), AppError> {
+    let path = normalized_file_path(path)?;
+    if path == "/" {
+        return Err(AppError::bad_request(
+            "the root directory cannot be deleted",
+        ));
+    }
+    exec_capture(
+        client,
+        namespace,
+        pod,
+        vec![
+            "sh".into(),
+            "-c".into(),
+            "rm -rf -- \"$1\"".into(),
+            "kust-file-delete".into(),
+            path,
+        ],
+        container,
+        None,
+    )
+    .await?;
+    Ok(())
+}
+
+pub async fn pod_shell(
+    client: Client,
+    namespace: &str,
+    pod: &str,
+    container: Option<String>,
+) -> Result<kube::api::AttachedProcess, AppError> {
+    let api: Api<Pod> = Api::namespaced(client, namespace);
+    api.exec(
+        pod,
+        vec!["/bin/sh".to_string()],
+        &container_params(container, true),
+    )
+    .await
+    .map_err(AppError::from)
+}
+
 fn resource_gvk(kind: &str) -> Result<GroupVersionKind, AppError> {
     let normalized = kind.to_ascii_lowercase().replace(['-', '_'], "");
     let (group, version, api_kind) = match normalized.as_str() {
@@ -680,6 +1195,11 @@ fn resource_gvk(kind: &str) -> Result<GroupVersionKind, AppError> {
         "rolebindings" => ("rbac.authorization.k8s.io", "v1", "RoleBinding"),
         "clusterroles" => ("rbac.authorization.k8s.io", "v1", "ClusterRole"),
         "clusterrolebindings" => ("rbac.authorization.k8s.io", "v1", "ClusterRoleBinding"),
+        "httproutes" => ("gateway.networking.k8s.io", "v1", "HTTPRoute"),
+        "gateways" => ("gateway.networking.k8s.io", "v1", "Gateway"),
+        "gatewayclasses" => ("gateway.networking.k8s.io", "v1", "GatewayClass"),
+        "referencegrants" => ("gateway.networking.k8s.io", "v1beta1", "ReferenceGrant"),
+        "grpcroutes" => ("gateway.networking.k8s.io", "v1", "GRPCRoute"),
         _ => {
             return Err(AppError::bad_request(format!(
                 "resource kind '{kind}' cannot be opened"
@@ -792,6 +1312,17 @@ mod tests {
         assert_eq!(resource_gvk("events").unwrap().group, "");
         assert_eq!(resource_gvk("events").unwrap().version, "v1");
         assert!(resource_gvk("widgets").is_err());
+    }
+
+    #[test]
+    fn file_paths_are_absolute_without_parent_segments() {
+        assert_eq!(
+            normalized_file_path("etc/app/config.yaml").unwrap(),
+            "/etc/app/config.yaml"
+        );
+        assert_eq!(normalized_file_path("/").unwrap(), "/");
+        assert!(normalized_file_path("/etc/../passwd").is_err());
+        assert!(normalized_file_path("/tmp/\0file").is_err());
     }
 
     #[tokio::test]
