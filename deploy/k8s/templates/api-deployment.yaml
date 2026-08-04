@@ -82,6 +82,8 @@ spec:
               drop:
                 - ALL
             runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
       volumes:
         - name: runtime-config
           secret:

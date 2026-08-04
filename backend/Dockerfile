@@ -51,7 +51,7 @@ COPY --from=builder /app/target/release/kust-api /usr/local/bin/kust-api
 
 ENV LISTEN_ADDR=0.0.0.0:8080
 
-USER kust
+USER 10001:10001
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
