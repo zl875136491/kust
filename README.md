@@ -1,165 +1,448 @@
 # Kust
 
-Kust 是一个前后端分离的 Kubernetes 多集群管理控制台。产品结构参考 Headlamp 桌面应用：多集群首页、可折叠资源导航、资源概览与表格、详情抽屉、YAML 编辑、Pod 日志和 Deployment 扩缩容；视觉采用轻量玻璃拟态，并提供系统、浅色、深色三种主题模式。
+Kust 是一个面向平台团队与 Kubernetes 运维人员的多集群 Web 控制台。它采用无 Agent 架构，不向目标集群安装 CRD 或控制器；后端保存并使用 kubeconfig 访问 Kubernetes API，前端围绕资源浏览、YAML 变更和 Pod 现场操作提供桌面式工作区。
 
-## 技术栈
+> 本文描述当前代码已经实现的行为，不把演示界面或规划能力当作完成项。尚未完全落地的部分集中列在[当前边界](#当前边界)中。
 
-- 前端：React 19、TypeScript、Vite、TanStack Query、React Router、Lucide
-- 后端：Rust、Axum、kube-rs、MongoDB 官方 Rust Driver
-- 数据库：MongoDB 7
-- 部署：Docker Compose、Nginx、Jenkins、Kubernetes Gateway API
+## 项目定位
 
-## 功能
+Kust 的重点不是监控大屏，而是日常运维闭环：
 
-- 多集群接入、切换与移除
-- 只读 kubeconfig 预设：启动时从本地文件或目录加密导入 MongoDB，后端强制禁止修改和删除，凭据不进入 API 响应或前端
-- kubeconfig AES-256-GCM 加密存储
-- MongoDB 资源读模型：后台同步 Kubernetes 资源快照，列表、概览、搜索、通知和地图只读取数据库缓存
-- OA 用户资料查询注册、密码登录、OA 登录、密码重置、内置管理员/运维/只读角色
-- TOTP 双重认证：管理员强制绑定，管理员免验证期 1-15 天，普通用户可关闭或设置 1-30 天
-- 用户设置同步：主题、玻璃效果、刷新、分页和安全设置绑定账号
-- 管理员系统设置：用户启停、角色分配、注册与 OA 登录策略、会话时长、缓存与同步周期
-- 集群概览：CPU、内存、Pod、Node 与 Events
-- Workloads：Pods、Deployments、StatefulSets、DaemonSets、ReplicaSets、Jobs、CronJobs
-- Storage：PVC、PV、StorageClass
-- Network：Service、Endpoints、EndpointSlice、Ingress、NetworkPolicy
-- Gateway API：HTTPRoute、Gateway、GatewayClass、ReferenceGrant、GRPCRoute
-- Security：ServiceAccount、Role、RoleBinding、ClusterRole、ClusterRoleBinding
-- Config：ConfigMap、Secret
-- 资源详情、标签与元数据、YAML 查看/更新、批量删除
-- Pod 日志、Deployment 扩缩容、Server-Side Apply
-- Pod WebShell（xterm.js + Kubernetes exec）与 WebFile（Monaco Editor，支持目录、读取、保存、删除）
-- 资源关系地图、通知中心、全局搜索
+1. 在统一入口登录并选择集群、命名空间。
+2. 浏览、搜索、筛选 Kubernetes 资源并查看真实 YAML。
+3. 对资源执行 Server-Side Apply、删除或 Deployment 扩缩容。
+4. 将 Pod 日志、终端和文件管理器打开为可并行操作的窗口。
+5. 由管理员统一管理集群接入、账号角色、登录策略和缓存策略。
 
-## 架构
+Kust 更适合受信任的组织内部环境和中等规模集群目录。它目前不是多租户控制面、完整可观测平台或 Kubernetes Operator。
+
+## 当前能力
+
+| 领域 | 当前实现 |
+| --- | --- |
+| 多集群 | 管理员添加、编辑和移除用户集群；启动时导入只读预设 kubeconfig；全局集群切换 |
+| 资源浏览 | 30 类 Kubernetes 资源、命名空间过滤、搜索、状态筛选、排序、详情抽屉和批量选择 |
+| 资源变更 | YAML 创建/更新、Server-Side Apply、删除、Deployment 扩缩容、写后快照刷新 |
+| Pod 工具 | 日志查看、WebShell、文件浏览与 Monaco 编辑器、可拖拽多窗口和任务栏 |
+| 派生视图 | 集群概览、工作负载聚合、事件通知、全局搜索、资源关系地图 |
+| 身份安全 | 密码与 OA 登录、OA 用户资料注册、密码重置、TOTP、可信设备、三种内置角色 |
+| 平台管理 | 用户启停、角色分配、本地账号重置码、注册/OA 策略、会话和缓存周期 |
+| 个性化 | 系统/浅色/深色主题、玻璃效果开关、窗口关闭确认、账号级偏好同步 |
+
+### 支持的资源
+
+| 分组 | 资源 |
+| --- | --- |
+| 集群 | Namespace、Node、Event |
+| 工作负载 | Pod、Deployment、StatefulSet、DaemonSet、ReplicaSet、Job、CronJob |
+| 存储 | PersistentVolumeClaim、PersistentVolume、StorageClass |
+| 网络 | Service、Endpoints、EndpointSlice、Ingress、NetworkPolicy |
+| Gateway API | HTTPRoute、Gateway、GatewayClass、ReferenceGrant、GRPCRoute |
+| 安全 | ServiceAccount、Role、RoleBinding、ClusterRole、ClusterRoleBinding |
+| 配置 | ConfigMap、Secret |
+
+资源列表读取 MongoDB 中的同步快照。打开单个资源 YAML、读取 Pod 日志/文件以及所有写操作会实时访问 Kubernetes API。
+
+### 资源管理
+
+- 顶部保留当前集群与每个集群最后选择的命名空间。
+- 资源表支持名称/标签搜索、状态过滤、列排序和批量删除。
+- 详情抽屉展示状态、元数据、标签、类型特有字段和实时 YAML。
+- YAML 可复制、编辑并通过 Server-Side Apply 更新。
+- Deployment 支持直接调整副本数。
+- 全局搜索使用 `Cmd/Ctrl + K` 打开，合并页面、集群和资源快照结果。
+- 资源地图依据 selector、Pod 名称、Ingress backend 和 HTTPRoute 引用推断依赖关系。
+
+### Pod 工作区
+
+Pod 详情可以打开三种独立工具窗口：
+
+- **日志**：默认读取 500 行，可选择 100-10000 行；每 5 秒刷新；支持暂停、自动换行、立即刷新和下载日志。
+- **终端**：xterm.js 通过 WebSocket 连接 Kubernetes exec，支持终端尺寸同步、主题切换和链接识别。
+- **文件**：浏览目录、面包屑导航、Monaco 多语言编辑、保存文件、新建目录和删除；单次读取/写入上限为 4 MB。
+
+窗口由 `react-rnd` 管理，支持拖动、缩放、层级聚焦、最小化、最大化、任务栏、断线重连和未保存变更保护。窗口目标与布局按用户保存在浏览器中；页面刷新后实时连接不会自动恢复，需要手动重连。
+
+每个窗口会显示“正在连接、已连接、正在重连、已断开、异常、资源已删除”状态；文件内容发生变化时还会显示“未保存”。最小化后的任务栏项由类型图标、截断后的资源名和状态/操作图标组成：断线或异常时可重连，资源已删除时显示红色 `F` 并允许直接移除，关闭行为遵循用户的窗口二次确认设置。
+
+Pod 文件功能通过容器内 `/bin/sh` 和常见命令执行，因此目标容器需要提供 `sh`、`cat`、`wc`、`mkdir`、`rm`、`dirname` 等基础工具。WebShell 同样要求容器内存在 `/bin/sh`。
+
+### 身份与平台管理
+
+- 本地密码登录，密码使用 Argon2 散列。
+- OA 用户资料查询后注册，支持 OA/Springboard 登录链接和密码重置链接投递。
+- Session、可信设备和一次性代码仅以 SHA-256 摘要保存在 MongoDB，并由 TTL 索引自动清理。
+- 管理员强制启用 TOTP；管理员可信设备有效期为 1-15 天，普通用户为 1-30 天。
+- 管理员可启停用户、分配角色、为本地账号生成一次性重置码。
+- 平台设置可调整注册/OA 登录开关、默认角色、会话时长、资源缓存 TTL 和全量同步周期。
+
+系统不会自动创建或提升首个管理员。新用户注册后需要由数据库运维显式赋予 `admin` 角色，管理员下次登录时会被要求绑定 TOTP。
+
+## 权限模型
+
+Kust 当前按内置角色名执行权限判断：
+
+| 能力 | `viewer` | `operator` | `admin` |
+| --- | :---: | :---: | :---: |
+| 查看集群、资源、YAML、日志和文件 | 是 | 是 | 是 |
+| 写入/删除资源、扩缩容、手动同步 | 否 | 是 | 是 |
+| WebShell、写文件、建目录和删文件 | 否 | 是 | 是 |
+| 添加、编辑和移除集群配置 | 否 | 否 | 是 |
+| 用户、角色和平台设置管理 | 否 | 否 | 是 |
+| 保存个人设置 | 是 | 是 | 是 |
+
+MongoDB 中 `roles.permissions` 当前用于展示，后端尚未实现通用的权限表达式解析器。集群目录对所有已登录用户可见，`owner_user_id` 暂未参与访问控制。
+
+Kust 权限与 kubeconfig 自身的 Kubernetes RBAC 会叠加生效。预设集群的“只读”仅表示不能在 Kust 中编辑或移除该集群配置，不表示 Kubernetes 资源只读。
+
+## 系统架构
 
 ```mermaid
 flowchart LR
-  UI["React Web"] -->|REST /api| API["Rust / Axum"]
-  API -->|users, settings, encrypted kubeconfig, resource snapshots| DB[(MongoDB)]
-  API -->|background sync + writes| K1["Kubernetes Cluster A"]
-  API -->|background sync + writes| K2["Kubernetes Cluster B"]
-  UI -->|WebSocket / realtime REST| API
+  Browser["React 19 SPA"] -->|"REST /api"| Nginx["Nginx"]
+  Browser -->|"WebSocket / Pod shell"| Nginx
+  Nginx --> API["Rust / Axum API"]
+  API --> Mongo[("MongoDB")]
+  API -->|"kube-rs + encrypted kubeconfig"| K1["Kubernetes Cluster A"]
+  API -->|"kube-rs + encrypted kubeconfig"| K2["Kubernetes Cluster B"]
+  API -->|"profile lookup / message delivery"| OA["OA / Springboard"]
+
+  Mongo --- Identity["users / roles / sessions / settings"]
+  Mongo --- Clusters["clusters / encrypted kubeconfig"]
+  Mongo --- Snapshots["resource snapshots"]
 ```
 
-MongoDB 是前端资源查询的主要数据源。`KUST_CACHE_TTL_SECONDS` 与 `KUST_CACHE_SYNC_SECONDS` 作为首次启动默认值写入平台设置，之后可由管理员在系统设置中调整；缓存缺失时同步等待，缓存过期时先返回已有数据并在后台刷新。资源写入 Kubernetes 成功后会刷新对应快照。Secret/ConfigMap 列表只缓存键名和元数据，不缓存内容。
+### 读写数据流
 
-敏感或交互式操作保持实时直连 Kubernetes：资源 YAML、Pod 日志、WebShell、WebFile，以及所有资源写操作。访问能力仍受保存 kubeconfig 的 Kubernetes RBAC 约束，并叠加 Kust 的 admin/operator/viewer 角色权限。
-
-预设 kubeconfig 只由后端读取。可通过 `KUST_PRESET_CONFIG_DIR` 指定目录，或通过 `KUST_PRESET_CONFIG_PATH` 指定单个文件；未设置时本地开发默认读取仓库旁的 `tj_config`。每次启动会按文件与 context 的稳定键同步到 MongoDB，并清理已移除的预设。
-
-未设置 `MONGODB_URI` 时，后端默认读取仓库旁的 `mongodb.txt`。该文件支持带引号的值和 `MONGO_DB_AUTH_SOURCE`，认证库默认是 `admin`。OA/Springboard 配置优先读取环境变量，也可从 `OA_CONFIG_PATH`（默认仓库旁 `oa_auth.txt`）中的字符串赋值读取。新用户注册要求配置 `OA_USER_INFO_URL`（或配置文件中的 `USER_INFO_URL`），后端按 `GET <URL>?itcode=<username>` 查询并校验用户资料。
-
-## 快速预览
-
-完整功能需要后端、MongoDB 和至少一个用户账号：
-
-```bash
-cd frontend
-npm install
-npm run dev
+```mermaid
+flowchart TD
+  UI["React UI"] --> API["Axum API"]
+  API --> Decision{"Operation type"}
+  Decision -->|"list / overview / search / map / events"| ReadModel["MongoDB resource snapshots"]
+  ReadModel -->|"cache miss"| Sync["synchronous Kubernetes fetch"]
+  ReadModel -->|"stale"| Old["return current snapshot"]
+  Old --> Refresh["refresh asynchronously"]
+  Decision -->|"YAML / logs / files"| Live["live Kubernetes request"]
+  Decision -->|"apply / delete / scale / exec / file write"| Write["authorized Kubernetes write"]
+  Write --> RefreshKind["refresh affected snapshot"]
 ```
 
-打开 [http://localhost:5173](http://localhost:5173)。前端资源数据统一由后端的 MongoDB 读模型提供。
+资源快照采用 stale-while-revalidate 语义：
 
-## 完整环境
+1. 快照不存在时，请求会等待一次 Kubernetes 同步。
+2. 快照仍在 TTL 内时，直接返回 MongoDB 数据。
+3. 快照过期时，先返回现有数据，再异步刷新。
+4. 后台任务还会按平台设置的周期遍历“集群 x 资源类型”进行全量同步。
+5. 命名空间和标签过滤在后端内存中完成。
+
+Secret/ConfigMap 快照只保存键名、状态和元数据，不缓存具体值。显式打开 Secret YAML 时仍会实时读取完整资源，最终可见范围取决于 kubeconfig 的 Kubernetes RBAC。
+
+### MongoDB 集合
+
+| 集合 | 用途 |
+| --- | --- |
+| `clusters` | 集群元数据、来源、加密 kubeconfig |
+| `resource_snapshots` | 按集群和资源类型保存的读模型 |
+| `users` / `roles` | 用户身份和内置角色 |
+| `sessions` | Bearer 会话摘要和认证阶段 |
+| `trusted_devices` | TOTP 免验证设备摘要 |
+| `auth_codes` | 登录/重置一次性代码摘要 |
+| `user_settings` | 主题、视觉、资源和窗口偏好 |
+| `platform_settings` | 注册、OA、缓存和会话策略 |
+
+后端启动时创建唯一索引、查询索引和 TTL 索引，并 seed `admin`、`operator`、`viewer` 三种角色。项目目前没有独立的数据库迁移框架。
+
+## 前端设计
+
+### 信息架构
+
+- 桌面端采用 220px 可折叠侧栏、58px 顶栏和最大 1540px 内容区；侧栏折叠后为 64px。
+- 左侧按 Kubernetes 领域组织资源，顶部承载集群、命名空间、全局搜索、主题、通知和账号入口。
+- 主内容以紧凑工具栏、状态标签、统计摘要和数据表为主，避免大面积营销式版面。
+- 资源详情使用侧边抽屉，编辑/确认使用模态框，Pod 工具使用独立窗口，三类任务保持清晰分层。
+
+### 视觉语言
+
+- 自定义 Liquid Glass 视觉系统：半透明面板、镜面高光、轻微红/蓝边缘色散和指针跟随光源。
+- 浅色主题使用冷灰绿背景，深色主题使用近黑背景；绿色为主强调色，蓝、紫、橙、红用于类型和状态区分。
+- SVG displacement 提供增强折射；Firefox、粗指针、移动端和 `prefers-reduced-motion` 环境会回退到普通玻璃效果。
+- 主题、指针高光、折射、背景模糊和悬停动效都可以由用户设置控制。
+
+### 交互与响应式
+
+- Lucide 图标、语义表格、ARIA 标签、`focus-visible` 和分层 Escape 关闭已覆盖主要交互。
+- 模态框、抽屉和工作区窗口统一处理关闭动画、二次确认和未保存内容。
+- 1180px 以下搜索框收为图标，统计与卡片减少列数。
+- 760px 以下侧栏变为遮罩抽屉，详情和 YAML 编辑器接近全屏，文件工具改为上下布局。
+- 430px 以下进一步压缩操作文字和管理列表。
+
+整体设计识别度高，且能支撑高频运维的扫描和多任务场景。代价是大量辅助文字位于 9-12px 区间，低分辨率或远距离阅读时可读性有限；重度玻璃合成也需要在目标浏览器和低性能设备上持续验证。
+
+## 前端状态分层
+
+| 状态 | 管理方式 | 持久化 |
+| --- | --- | --- |
+| 资源列表、概览、工作负载 | TanStack Query | 页面内存 |
+| 集群目录 | `DataContext` | MongoDB |
+| 用户与认证阶段 | `AuthContext` | Token 镜像到 localStorage |
+| 主题和视觉效果 | `ThemeContext` / `VisualEffectsContext` | MongoDB + localStorage |
+| 命名空间选择 | `NamespaceContext` | localStorage |
+| Pod 工具窗口 | `WorkspaceWindowsContext` | 按用户保存窗口布局到 localStorage |
+| 通知已读 | 页面组件状态 | 不持久化 |
+
+主要 Provider 组合位于 `frontend/src/App.tsx`：Theme -> Visual Effects -> React Query -> Auth -> Data -> Preferences -> Toast -> Router -> Namespace -> Workspace Windows。
+
+## 技术栈
+
+| 层 | 技术 |
+| --- | --- |
+| 前端 | React 19、TypeScript 5.7、Vite 6、React Router 7、TanStack Query 5 |
+| 运维交互 | xterm.js、Monaco Editor、react-rnd、yaml、Lucide React、QRCode |
+| 后端 | Rust 2021、Tokio、Axum 0.8、kube-rs 0.98、k8s-openapi 1.30 |
+| 数据与集成 | MongoDB 7、reqwest、serde、serde_yaml |
+| 安全 | Argon2、AES-256-GCM、TOTP/HMAC-SHA1、SHA-256 |
+| 交付 | Docker、Nginx、Docker Compose、Jenkins、Kubernetes Gateway API |
+
+前端容器使用 Node.js 22 构建。后端 CI/容器固定 Rust 1.97.1，但仓库没有 `rust-toolchain.toml`，本机工具链不会自动锁定。
+
+## 目录结构
+
+```text
+.
+|-- frontend/
+|   |-- src/pages/                 # 页面和路由视图
+|   |-- src/components/            # UI、布局、资源和工作区组件
+|   |-- src/*-context.tsx          # 认证、数据、偏好、主题、命名空间、窗口状态
+|   |-- src/api.ts                 # REST/WebSocket 客户端
+|   |-- src/styles.css             # 设计系统与响应式样式
+|   `-- nginx.conf                 # 静态资源、API 和 WebSocket 反向代理
+|-- backend/
+|   |-- src/routes.rs              # 集群、资源、搜索、Pod 工具路由
+|   |-- src/auth_routes.rs         # 身份、设置和管理员路由
+|   |-- src/kubernetes.rs          # Kubernetes 资源和 exec 实现
+|   |-- src/cache.rs               # MongoDB 快照读模型和同步
+|   |-- src/state.rs               # 共享状态和预设 kubeconfig
+|   |-- src/db.rs                  # 索引、角色和平台设置初始化
+|   `-- src/config.rs              # 环境变量和本地配置文件
+|-- deploy/k8s/                    # Deployment、Service、HTTPRoute 和 SSA 脚本
+|-- compose.yaml                   # MongoDB + API + Web 本地基础栈
+|-- Jenkinsfile                    # CI/CD 流水线
+`-- .env.example                   # Compose 环境变量示例
+```
+
+## 快速启动
+
+### Docker Compose 基础栈
 
 ```bash
 cp .env.example .env
-# 修改 .env 中的 KUST_ENCRYPTION_KEY
+# 至少替换 KUST_ENCRYPTION_KEY，生产环境不要使用示例值
 docker compose up --build
 ```
 
-打开 [http://localhost:3000](http://localhost:3000)。MongoDB 数据写入 `mongo-data` volume。
+打开 [http://localhost:3000](http://localhost:3000)，或检查：
 
-## CI/CD 与 Kubernetes
+```bash
+curl http://localhost:3000/api/health
+```
 
-根目录 `Jenkinsfile` 会依次执行 Rust 格式检查、Clippy、单元测试、前端 lint 与构建，随后为 `linux/amd64` 构建前后端镜像并推送到 Harbor。镜像以 Git SHA 标记，部署阶段使用 registry digest，避免可变标签引起版本漂移。`main` 分支默认先部署测试环境，再部署生产环境：
+MongoDB 数据保存在 `mongo-data` volume。`docker compose down` 会保留数据，`docker compose down -v` 会永久删除该 volume。
 
-- 生产：`http://k8s.1oa.com.cn/kust`，Deployment/Service/HTTPRoute 前缀为 `kust`
-- 测试：`http://k8s.1oa.com.cn/kust_test`，Deployment/Service/HTTPRoute 前缀为 `kust-test`
+Compose 当前只注入基础 MongoDB、密钥、监听和 CORS 配置，没有挂载 OA 配置或预设 kubeconfig。全新数据库中也没有初始用户，因此基础栈可以完成服务健康检查，但不能直接体验完整登录与集群管理流程。
 
-Jenkins 需要两个凭据：Harbor 用户名密码 `infra_harbor_auth`，以及 Secret text 类型的 Kubernetes token `tianjin_k8s_admin_token`。`custom-apps` 命名空间需要预先创建 `kust-harbor` image pull secret，以及 `kust-runtime`、`kust-test-runtime` 两个运行时 Secret；后两者包含 `mongodb.txt`、`oa_auth.txt`、`tj_config` 和独立的 `encryption-key`。任何密钥或 kubeconfig 都不进入 Git 或构建产物。
+### 完整本地开发
 
-注册用户查询地址通过 Jenkins 的 `USER_INFO_URL` 环境变量传入，部署模板会将其映射为后端读取的 `OA_USER_INFO_URL`。天津 K8s 的 Pod DNS 无法解析该内网域名，因此 `USER_INFO_HOST` 与 `USER_INFO_HOST_IP` 会为 API Pod 添加应用级 `hostAliases`；这些值均不是 Secret，可以在 Jenkinsfile 中按环境调整。
+先启动 MongoDB：
 
-Kubernetes 模板位于 `deploy/k8s/templates`。`deploy/k8s/apply.sh` 通过 Server-Side Apply 更新资源，等待两个 Deployment 就绪，并通过 Gateway 路由检查前端和数据库健康状态。前端镜像在容器启动时读取 `APP_BASE_PATH`，同一镜像可安全运行在两个不同的 URL 前缀下。
+```bash
+docker compose up -d mongo
+```
 
-## 本地开发
-
-先启动 MongoDB，再运行后端：
+启动后端：
 
 ```bash
 cd backend
 export MONGODB_URI=mongodb://127.0.0.1:27017
 export MONGODB_DATABASE=kust
 export KUST_ENCRYPTION_KEY='replace-with-at-least-24-random-characters'
-# 可选：KUST_PRESET_CONFIG_PATH=/absolute/path/to/tj_config
-cargo run
+
+# 至少配置一个可用的集群来源
+export KUST_PRESET_CONFIG_PATH=/absolute/path/to/kubeconfig
+
+# 新用户注册需要 OA 用户资料查询接口
+export OA_USER_INFO_URL=https://oa.example/user-info
+
+cargo run --locked
 ```
 
-另一个终端运行前端：
+另一个终端启动前端：
 
 ```bash
 cd frontend
+npm ci
 npm run dev
 ```
 
-Vite 会把 `/api` 代理到 `http://127.0.0.1:8080`。
+打开 [http://localhost:5173](http://localhost:5173)。Vite 会把 `/api` 和 WebSocket 请求代理到 `http://127.0.0.1:8080`。
 
-## API
+后端没有 dotenv 依赖，直接执行 `cargo run` 不会自动加载仓库根目录的 `.env`；请使用 `export`、shell 工具或容器显式注入配置。
+
+## 配置
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `LISTEN_ADDR` | `0.0.0.0:8080` | Axum 监听地址 |
+| `MONGODB_URI` | 配置文件或 `mongodb://127.0.0.1:27017` | MongoDB 连接串 |
+| `MONGODB_DATABASE` | 配置文件或 `kust` | 数据库名 |
+| `MONGODB_CONFIG_PATH` | `../../mongodb.txt` | MongoDB 键值配置文件 |
+| `MONGODB_AUTH_SOURCE` | 文件值或 `admin` | MongoDB 认证库 |
+| `KUST_ENCRYPTION_KEY` | 开发示例值 | 至少 24 字符；生产必须显式设置 |
+| `CORS_ORIGIN` | `http://localhost:5173` | 单个允许的前端 Origin |
+| `FRONT_URL` | `CORS_ORIGIN` | OA 回调/消息中的前端地址 |
+| `KUST_PRESET_CONFIG_DIR` | 无 | 预设 kubeconfig 目录，优先于单文件变量 |
+| `KUST_PRESET_CONFIG_PATH` | `../../tj_config` | 单个预设 kubeconfig 或目录 |
+| `KUST_CACHE_TTL_SECONDS` | `45` | 首次创建平台设置时的缓存 TTL，范围 15-600 |
+| `KUST_CACHE_SYNC_SECONDS` | `60` | 首次创建平台设置时的同步周期，范围 15-3600 |
+| `OA_CONFIG_PATH` | `../../oa_auth.txt` | OA/Springboard 配置文件 |
+| `OA_USER_INFO_URL` | 无 | `GET <URL>?itcode=<username>` 用户资料查询接口 |
+| `SPRINGBOARD_URL` | 内置 OA 地址 | OA 消息投递入口 |
+| `SPRINGBOARD_APP` | `kust` | OA 应用标识 |
+| `KUST_EXPOSE_LOCAL_RESET_CODES` | `false` | 仅本地调试时返回登录/重置码 |
+| `RUST_LOG` | `kust_api=info,tower_http=info` | Rust tracing 过滤器 |
+| `VITE_API_URL` | 当前站点的 `<base>/api` | 前端编译时 API 根地址 |
+| `API_UPSTREAM` | `api:8080` | 前端容器 Nginx 的 API 上游 |
+| `APP_BASE_PATH` | `/` | 前端容器运行时 URL 前缀 |
+
+`KUST_CACHE_TTL_SECONDS` 和 `KUST_CACHE_SYNC_SECONDS` 只用于首次创建全局平台设置；初始化后以 MongoDB 中管理员保存的值为准。
+
+默认相对配置路径从 `backend` crate 的编译位置解析。生产部署应使用绝对路径或容器 Secret 挂载，避免依赖本地目录布局。
+
+## API 概览
+
+所有受保护的 REST API 使用 `Authorization: Bearer <token>`。
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
-| `GET` | `/api/health` | 服务与数据库状态 |
-| `GET` | `/api/auth/capabilities` | 当前注册与 OA 登录能力 |
-| `POST` | `/api/auth/register/lookup` | 按用户名查询注册所需的 OA 用户资料 |
-| `POST` | `/api/auth/register`, `/api/auth/login` | 注册并自动登录、密码登录 |
-| `POST` | `/api/auth/oa/request`, `/api/auth/code` | OA 登录链接与代码登录 |
-| `GET/POST` | `/api/auth/2fa/setup`, `/api/auth/2fa/verify` | TOTP 绑定与验证 |
-| `GET/PUT` | `/api/settings` | 用户设置读取与保存 |
-| `GET/PUT` | `/api/admin/settings` | 管理员读取与保存平台设置 |
-| `GET` | `/api/admin/users`, `/api/admin/roles` | 管理员查询用户与角色 |
-| `PATCH` | `/api/admin/users/:id/roles`, `/api/admin/users/:id/status` | 管理员分配角色或启停账号 |
-| `GET/POST` | `/api/clusters` | 查询或添加集群 |
-| `PATCH/DELETE` | `/api/clusters/:id` | 编辑或移除用户集群配置 |
-| `GET` | `/api/clusters/:id/overview` | 集群概览 |
-| `GET` | `/api/clusters/:id/resources/:kind` | 查询资源 |
+| `GET` | `/api/health` | API 与 MongoDB 健康状态 |
+| `GET` | `/api/auth/capabilities` | 注册与 OA 登录能力 |
+| `POST` | `/api/auth/register/lookup` | 查询注册所需的 OA 用户资料 |
+| `POST` | `/api/auth/register` | 注册并创建会话 |
+| `POST` | `/api/auth/login`、`/api/auth/logout` | 密码登录与退出 |
+| `POST` | `/api/auth/oa/request`、`/api/auth/code` | OA 登录链接与代码登录 |
+| `POST` | `/api/auth/password/request`、`/api/auth/password/reset` | 密码重置 |
+| `GET` | `/api/auth/2fa/setup` | 获取 TOTP 绑定信息 |
+| `POST` | `/api/auth/2fa/verify` | 验证 TOTP 并完成绑定/登录 |
+| `GET/PUT` | `/api/settings` | 个人设置 |
+| `GET/PUT` | `/api/admin/settings` | 平台设置 |
+| `GET` | `/api/admin/users`、`/api/admin/roles` | 用户和角色 |
+| `PATCH` | `/api/admin/users/{id}/roles`、`/api/admin/users/{id}/status` | 角色与账号状态管理 |
+| `POST` | `/api/admin/users/{id}/reset-code` | 为本地账号生成重置码 |
+| `GET/POST` | `/api/clusters` | 集群列表与添加 |
+| `PATCH/DELETE` | `/api/clusters/{id}` | 编辑或移除集群配置 |
+| `GET` | `/api/clusters/{id}/overview` | 集群概览 |
+| `GET` | `/api/clusters/{id}/resources/{kind}` | 资源快照列表 |
+| `GET/DELETE` | `/api/clusters/{id}/resources/{kind}/{namespace}/{name}` | 实时 YAML 或删除资源 |
+| `PATCH` | `/api/clusters/{id}/deployments/{namespace}/{name}/scale` | Deployment 扩缩容 |
+| `GET` | `/api/clusters/{id}/pods/{namespace}/{name}/logs` | Pod 日志 |
+| `GET` | `/api/clusters/{id}/pods/{namespace}/{name}/shell` | Pod WebSocket 终端 |
+| `GET/PUT/DELETE` | `/api/clusters/{id}/pods/{namespace}/{name}/file` | Pod 文件读写和删除 |
+| `GET` | `/api/clusters/{id}/pods/{namespace}/{name}/files` | Pod 目录浏览 |
+| `POST` | `/api/clusters/{id}/pods/{namespace}/{name}/directory` | Pod 目录创建 |
+| `POST` | `/api/clusters/{id}/apply` | Server-Side Apply YAML |
 | `GET` | `/api/search` | 跨集群资源搜索 |
-| `GET` | `/api/clusters/:id/map` | 动态资源关系地图 |
-| `POST` | `/api/clusters/:id/sync` | 手动同步集群缓存 |
-| `GET/DELETE` | `/api/clusters/:id/resources/:kind/:namespace/:name` | 读取 YAML 或删除资源 |
-| `PATCH` | `/api/clusters/:id/deployments/:namespace/:name/scale` | Deployment 扩缩容 |
-| `GET` | `/api/clusters/:id/pods/:namespace/:name/logs` | Pod 日志 |
-| `GET` | `/api/clusters/:id/pods/:namespace/:name/shell` | Pod WebSocket 终端 |
-| `GET` | `/api/clusters/:id/pods/:namespace/:name/files` | Pod 文件目录 |
-| `GET/PUT/DELETE` | `/api/clusters/:id/pods/:namespace/:name/file` | 读取、写入或删除 Pod 文件 |
-| `POST` | `/api/clusters/:id/pods/:namespace/:name/directory` | 创建 Pod 目录 |
-| `POST` | `/api/clusters/:id/apply` | Server-Side Apply YAML |
+| `GET` | `/api/clusters/{id}/map` | 缓存资源关系地图 |
+| `POST` | `/api/clusters/{id}/sync` | 手动同步全部支持资源 |
 
 ## 验证
 
+前端：
+
 ```bash
 cd frontend
-npm run build
+npm ci
 npm run lint
-
-cd ../backend
-cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
-cargo test
-# Optional live smoke test against the local tj_config cluster
-KUST_TEST_KUBECONFIG=../../tj_config cargo test live_cluster_resource_smoke_test -- --ignored
+npm run build
 ```
+
+后端：
+
+```bash
+cd backend
+cargo fmt --all -- --check
+cargo clippy --all-targets --locked -- -D warnings
+cargo test --locked
+```
+
+可选的真实集群 smoke test：
+
+```bash
+KUST_TEST_KUBECONFIG=/absolute/path/to/kubeconfig \
+  cargo test --locked live_cluster_resource_smoke_test -- --ignored
+```
+
+当前前端没有 `test` 脚本或自动化测试。后端当前有 9 个测试，其中 1 个真实集群 smoke test 默认忽略。
+
+## CI/CD 与部署
+
+- 所有分支执行 Rust fmt、Clippy、测试，以及前端 lint 和构建。
+- `main` 分支为 `linux/amd64` 构建前后端镜像并推送到 Harbor。
+- 镜像使用 `sha-<12位 Git SHA>` 标签，部署使用不可变 registry digest。
+- Jenkins 参数控制测试和生产部署；两者都启用时按测试环境、生产环境顺序执行。
+- 测试环境使用 `/kust_test` 和独立 MongoDB 数据库，生产环境使用 `/kust`。
+- Kubernetes 模板只部署 API、Web、Service 和 Gateway API HTTPRoute，不部署 MongoDB。
+- 运行环境需要预先创建镜像拉取 Secret，以及分别面向测试/生产的 runtime Secret。
+- runtime Secret 包含 MongoDB 配置、OA 配置、预设 kubeconfig 和独立加密密钥。
+- `deploy/k8s/apply.sh` 不依赖 kubectl；它通过 Kubernetes HTTP API 执行 Server-Side Apply，等待 Deployment 就绪并检查公开健康端点。
+- 前端容器启动时替换 `APP_BASE_PATH`，同一静态镜像可以部署到不同 URL 前缀。
+
+当前流水线部署目标：
+
+| 环境 | 访问地址 | 资源前缀 | MongoDB 数据库 |
+| --- | --- | --- | --- |
+| 测试 | [http://k8s.1oa.com.cn/kust_test/](http://k8s.1oa.com.cn/kust_test/) | `kust-test` | `kust_test` |
+| 生产 | [http://k8s.1oa.com.cn/kust/](http://k8s.1oa.com.cn/kust/) | `kust` | `kust` |
+
+Jenkins 需要 Harbor 用户名密码凭据 `infra_harbor_auth`，以及 Secret text 类型的 Kubernetes Token `tianjin_k8s_admin_token`。`custom-apps` 命名空间需要预先提供 `kust-harbor` image pull secret，以及 `kust-runtime`、`kust-test-runtime` 两个运行时 Secret；运行时 Secret 挂载 `mongodb.txt`、`oa_auth.txt`、`tj_config` 和各环境独立的 `encryption-key`。
+
+注册用户查询地址由 Jenkins 的 `USER_INFO_URL` 传入并映射为后端的 `OA_USER_INFO_URL`。当前集群通过 `USER_INFO_HOST` 和 `USER_INFO_HOST_IP` 为 API Pod 配置 `hostAliases`，用于访问无法由 Pod DNS 解析的内部 OA 地址。
+
+当前 Kubernetes 模板中 API 和 Web 都是单副本。`apply.sh` 使用 `curl --insecure` 连接既定内部 Kubernetes API，这是现有内部部署假设，不适合直接照搬到不受信任网络。
 
 ## 安全说明
 
-- 生产环境必须设置高强度 `KUST_ENCRYPTION_KEY`，更换密钥前需要迁移已保存的 kubeconfig。
-- 所有受保护 API 使用 `Authorization: Bearer` 会话；WebShell 通过 WebSocket 查询参数传递会话 token。生产环境必须使用 HTTPS/WSS，并避免在反向代理访问日志中记录查询字符串。
-- 新注册和首次导入的 OA 用户默认获得系统设置中配置的角色，初始值为 `viewer`，且不能将 `admin` 设为注册默认角色。系统不会自动创建或提升首个管理员；请由数据库运维显式将目标用户的 `roles` 设置为包含 `admin`。该用户下次登录时会被强制完成 TOTP 绑定。
-- `KUST_EXPOSE_LOCAL_RESET_CODES` 仅用于本地开发，生产环境必须保持关闭。
-- 用户能看到和操作的资源取决于所保存 kubeconfig 的 RBAC 权限；不要录入权限高于使用者需要的凭据。
-- Secret 数据只在显式打开其 YAML 时由 Kubernetes API 返回，资源列表不会展示 Secret 内容。
+- kubeconfig 和 TOTP Secret 使用 AES-256-GCM 加密后写入 MongoDB，kubeconfig 不进入 API 响应或前端状态。
+- `KUST_ENCRYPTION_KEY` 变更前必须迁移已有密文，否则后端将无法解密现有集群和 TOTP 配置。
+- 会话和可信设备令牌保存在浏览器 localStorage；生产必须使用 HTTPS。
+- WebSocket API 将 access token 放在查询参数中；生产必须使用 WSS，并确保反向代理不记录查询字符串。
+- viewer 仍可读取实时资源 YAML、日志和 Pod 文件；打开 Secret YAML 可能返回敏感值，应通过 Kubernetes RBAC 限制共享 kubeconfig 权限。
+- admin/operator 的写能力仍受 kubeconfig 对应 Kubernetes RBAC 限制。
+- Pod 文件功能能够修改和递归删除容器内文件，只应开放给受信任的运维角色。
+- `KUST_EXPOSE_LOCAL_RESET_CODES` 只能用于本地开发，生产必须保持关闭。
+- 当前代码未实现用户级集群 ACL、审计日志、API rate limiting 或细粒度自定义角色执行引擎，部署时应由网关、网络和组织流程补足控制。
+
+## 当前边界
+
+### 产品与交互
+
+- **项目页是展示分组**：当前用固定名称和前三个集群拼装，不存在项目后端模型、创建、编辑或成员管理。
+- **通知不是持久化通知中心**：它读取一个集群的 Event，已读状态只存在组件内存；离开页面或刷新后会丢失，顶部红点也不是实时未读数。
+- **CPU/内存指标未接入**：后端当前始终返回空值，概览页会显示“Metrics API 未启用”。
+- **部分个人设置尚未消费**：主题、视觉效果和窗口关闭确认已生效；`autoRefresh` 与 `pageSize` 虽能保存，但资源页尚未使用它们控制刷新或分页。
+- **权限 UI 尚未完全收口**：部分详情抽屉和 Pod 工具仍会向 viewer 展示写操作或终端入口，后端会返回 403，但界面会产生“看得到、做不了”的体验。
+- **工作负载表不含 Pod**：统计卡包含 Pod，当前聚合表从第二个资源组开始展开，因此不会列出 Pod。
+- **移动端上下文切换受限**：760px 以下顶栏隐藏集群/命名空间选择器，侧栏没有等价的命名空间入口。
+- **文件工具不是完整文件传输器**：当前没有上传、下载文件或显式新建文件入口，也没有 Pod 容器选择器；默认使用资源详情中的第一个容器。
+
+### 架构与规模
+
+- 后台同步使用周期轮询而不是 watch/informer，缓存型页面不保证与 Kubernetes API 瞬时一致。
+- 全量同步按“集群 x 资源类型”顺序执行；API 多副本会各自启动同步任务，没有 leader election。
+- 每次实时 Kubernetes 请求都会解密 kubeconfig 并创建 Client，当前没有 Client 连接池。
+- 全局搜索会把匹配范围内的快照读入应用进程后评分，资源表也在浏览器中全量排序/过滤，没有服务端分页或虚拟化。
+- 资源地图使用固定宽度列式布局并限制部分资源数量，适合运维定位，不是完整实时拓扑引擎。
+- Rust DTO 与 TypeScript 类型手工维护，当前没有 OpenAPI 或生成式客户端。
+- `kubernetes.rs`、`auth_routes.rs` 和 `routes.rs` 体积较大，路由、服务与存储职责仍有进一步拆分空间。
+- 前端缺少自动化测试；现有后端测试主要覆盖配置解析、加密、OA 响应解析和少量 Kubernetes 工具逻辑。
 
 ## License
 
