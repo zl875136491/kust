@@ -1,4 +1,21 @@
-FROM rust:1.97-bookworm AS builder
+FROM python:3.12.10-bookworm AS rust-toolchain
+
+ARG RUST_TOOLCHAIN=1.97.1
+
+ENV CARGO_HOME=/usr/local/cargo \
+    RUSTUP_HOME=/usr/local/rustup \
+    CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse \
+    PATH=/usr/local/cargo/bin:${PATH}
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential curl pkg-config \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl --proto '=https' --tlsv1.2 --fail --silent --show-error https://sh.rustup.rs \
+      | sh -s -- -y --no-modify-path --profile minimal --default-toolchain "${RUST_TOOLCHAIN}" --component clippy,rustfmt \
+    && rustc --version \
+    && cargo --version
+
+FROM rust-toolchain AS builder
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 RUN mkdir src \
@@ -9,8 +26,7 @@ COPY src ./src
 RUN cargo build --release --locked
 
 FROM builder AS test
-RUN rustup component add clippy rustfmt \
-    && cargo fmt --all -- --check \
+RUN cargo fmt --all -- --check \
     && cargo clippy --all-targets --locked -- -D warnings \
     && cargo test --locked
 
