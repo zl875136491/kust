@@ -8,6 +8,7 @@ import { EmptyState, IconButton } from '../components/ui';
 import { useData } from '../data-context';
 import { resourceDescriptors } from '../navigation';
 import type { ResourceRow } from '../types';
+import { useNamespaceSelection } from '../namespace-context';
 
 const kinds = ['pods', 'deployments', 'statefulsets', 'daemonsets', 'replicasets', 'jobs', 'cronjobs'];
 const tones = ['#3978bd', '#2d8b73', '#8a63b8', '#c07a3d', '#4f8894', '#a95e68', '#677388'];
@@ -19,7 +20,8 @@ function healthy(row: ResourceRow) {
 export function WorkloadsPage() {
   const { clusterId = '' } = useParams();
   const [searchParams] = useSearchParams();
-  const namespace = searchParams.get('namespace') || 'all';
+  const { getNamespace } = useNamespaceSelection();
+  const namespace = searchParams.get('namespace') || getNamespace(clusterId);
   const { getResources } = useData();
   const [openRow, setOpenRow] = useState<ResourceRow>();
   const query = useQuery({

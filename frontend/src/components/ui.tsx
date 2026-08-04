@@ -210,6 +210,7 @@ interface ModalProps {
   children: ReactNode;
   footer?: ReactNode | ((requestClose: () => void) => ReactNode);
   width?: string;
+  className?: string;
   dirty?: boolean;
   closeDisabled?: boolean;
   onSave?: () => boolean | void | Promise<boolean | void>;
@@ -225,6 +226,7 @@ export function Modal({
   children,
   footer,
   width = '560px',
+  className = '',
   dirty = false,
   closeDisabled = false,
   onSave,
@@ -283,7 +285,7 @@ export function Modal({
       style={{ zIndex: priority }}
       onMouseDown={(event) => event.target === event.currentTarget && requestClose()}
     >
-      <section className={`modal glass-panel ${closing ? 'is-closing' : ''}`} role="dialog" aria-modal="true" aria-labelledby={titleId} style={{ maxWidth: width }}>
+      <section className={`modal glass-panel ${className} ${closing ? 'is-closing' : ''}`} role="dialog" aria-modal="true" aria-labelledby={titleId} style={{ maxWidth: width }}>
         <header className="modal__header">
           <div>
             <h2 id={titleId}>{title}</h2>

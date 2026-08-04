@@ -55,7 +55,8 @@ export function YamlApplyModal({ cluster, open, onClose }: { cluster: Cluster; o
       open={open}
       onClose={onClose}
       title="创建 / 应用资源"
-      width="760px"
+      width="min(94vw, 1440px)"
+      className="modal--resource-editor"
       dirty={yaml !== starterYaml}
       closeDisabled={submitting}
       onSave={submit}

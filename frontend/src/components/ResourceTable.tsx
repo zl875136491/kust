@@ -18,6 +18,7 @@ export function ResourceTable({
   rows,
   loading,
   showKind = false,
+  selectionMode = false,
   selected,
   onSelected,
   onOpen,
@@ -25,6 +26,7 @@ export function ResourceTable({
   rows: ResourceRow[];
   loading?: boolean;
   showKind?: boolean;
+  selectionMode?: boolean;
   selected?: Set<string>;
   onSelected?: (selected: Set<string>) => void;
   onOpen: (row: ResourceRow) => void;
@@ -49,7 +51,10 @@ export function ResourceTable({
     : sort.direction === 'asc' ? <ArrowUp size={13} /> : <ArrowDown size={13} />;
   const toggleAll = () => {
     if (!onSelected || !selected) return;
-    onSelected(selected.size === rows.length ? new Set() : new Set(rows.map((row) => row.uid)));
+    const allVisibleSelected = rows.length > 0 && rows.every((row) => selected.has(row.uid));
+    const next = new Set(selected);
+    rows.forEach((row) => allVisibleSelected ? next.delete(row.uid) : next.add(row.uid));
+    onSelected(next);
   };
   const toggleRow = (uid: string) => {
     if (!onSelected || !selected) return;
@@ -65,7 +70,7 @@ export function ResourceTable({
     <div className="resource-table-wrap">
       <table className="resource-table">
         <thead><tr>
-          {selected && <th className="check-cell"><input type="checkbox" aria-label="选择全部" checked={selected.size === rows.length && rows.length > 0} onChange={toggleAll} /></th>}
+          {selectionMode && selected && <th className="check-cell"><input type="checkbox" aria-label="选择全部" checked={rows.length > 0 && rows.every((row) => selected.has(row.uid))} onChange={toggleAll} /></th>}
           <th><button onClick={() => setSortKey('name')}>名称 <SortIcon column="name" /></button></th>
           {showKind && <th><button onClick={() => setSortKey('kind')}>类型 <SortIcon column="kind" /></button></th>}
           {hasNamespace && <th><button onClick={() => setSortKey('namespace')}>命名空间 <SortIcon column="namespace" /></button></th>}
@@ -76,9 +81,9 @@ export function ResourceTable({
           <th><button onClick={() => setSortKey('createdAt')}>存续时间 <SortIcon column="createdAt" /></button></th>
         </tr></thead>
         <tbody>{sortedRows.map((row) => (
-          <tr key={row.uid} className={selected?.has(row.uid) ? 'is-selected' : ''} onClick={() => onOpen(row)}>
-            {selected && <td className="check-cell" onClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`选择 ${row.name}`} checked={selected.has(row.uid)} onChange={() => toggleRow(row.uid)} /></td>}
-            <td><button className="resource-name" onClick={() => onOpen(row)}>{row.name}</button></td>
+          <tr key={row.uid} className={selectionMode && selected?.has(row.uid) ? 'is-selected' : ''} onClick={() => selectionMode ? toggleRow(row.uid) : onOpen(row)}>
+            {selectionMode && selected && <td className="check-cell" onClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`选择 ${row.name}`} checked={selected.has(row.uid)} onChange={() => toggleRow(row.uid)} /></td>}
+            <td><button className="resource-name" onClick={(event) => { event.stopPropagation(); if (selectionMode) toggleRow(row.uid); else onOpen(row); }}>{row.name}</button></td>
             {showKind && <td><span className="kind-label">{row.kind}</span></td>}
             {hasNamespace && <td>{row.namespace || '-'}</td>}
             <td><StatusPill status={row.status} /></td>

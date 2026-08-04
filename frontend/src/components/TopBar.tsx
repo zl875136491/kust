@@ -8,6 +8,7 @@ import type { Cluster, ResourceRow, ThemeMode } from '../types';
 import { IconButton, SelectMenu } from './ui';
 import { useAuth } from '../auth-context';
 import { useAnimatedPresence, useEscapeLayer } from '../hooks/useEscapeLayer';
+import { useNamespaceSelection } from '../namespace-context';
 
 const roleLabels: Record<string, string> = {
   admin: '管理员',
@@ -45,6 +46,7 @@ export function TopBar({ cluster, onMenu, onSearch }: { cluster?: Cluster; onMen
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { getNamespace, setNamespace: rememberNamespace } = useNamespaceSelection();
   const [namespaces, setNamespaces] = useState<ResourceRow[]>([]);
   const [accountOpen, setAccountOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -87,8 +89,15 @@ export function TopBar({ cluster, onMenu, onSearch }: { cluster?: Cluster; onMen
     navigate('/login', { replace: true });
   };
 
-  const currentNamespace = searchParams.get('namespace') || 'all';
+  const namespaceParam = searchParams.get('namespace');
+  const currentNamespace = cluster ? namespaceParam || getNamespace(cluster.id) : 'all';
+  useEffect(() => {
+    if (cluster && namespaceParam) rememberNamespace(cluster.id, namespaceParam);
+  }, [cluster, namespaceParam, rememberNamespace]);
+
   const setNamespace = (namespace: string) => {
+    if (!cluster) return;
+    rememberNamespace(cluster.id, namespace);
     const next = new URLSearchParams(searchParams);
     if (namespace === 'all') next.delete('namespace'); else next.set('namespace', namespace);
     setSearchParams(next, { replace: true });

@@ -1,4 +1,4 @@
-import { CirclePlus, RefreshCw, Search, ServerCrash, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { CirclePlus, ListChecks, RefreshCw, Search, ServerCrash, SlidersHorizontal, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, useSearchParams } from 'react-router-dom';
@@ -10,11 +10,13 @@ import { useData } from '../data-context';
 import { resourceDescriptors } from '../navigation';
 import type { ResourceRow } from '../types';
 import { useAuth } from '../auth-context';
+import { useNamespaceSelection } from '../namespace-context';
 
 export function ResourcePage() {
   const { clusterId = '', kind = '' } = useParams();
   const [searchParams] = useSearchParams();
-  const namespace = searchParams.get('namespace') || 'all';
+  const { getNamespace } = useNamespaceSelection();
+  const namespace = searchParams.get('namespace') || getNamespace(clusterId);
   const focusUid = searchParams.get('focus');
   const descriptor = resourceDescriptors[kind];
   const { clusters, getResources, deleteResource } = useData();
@@ -26,6 +28,7 @@ export function ResourcePage() {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all');
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
   const [openRow, setOpenRow] = useState<ResourceRow>();
   const [applyOpen, setApplyOpen] = useState(false);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
@@ -36,7 +39,11 @@ export function ResourcePage() {
     enabled: Boolean(clusterId && descriptor),
   });
 
-  useEffect(() => { setSelected(new Set()); setOpenRow(undefined); }, [kind, namespace]);
+  useEffect(() => {
+    setSelected(new Set());
+    setSelectionMode(false);
+    setOpenRow(undefined);
+  }, [kind, namespace]);
   const rows = useMemo(() => query.data?.items || [], [query.data?.items]);
   useEffect(() => {
     if (!focusUid || !rows.length) return;
@@ -59,6 +66,7 @@ export function ResourcePage() {
     try {
       for (const row of targets) await deleteResource(clusterId, kind, row);
       setSelected(new Set());
+      setSelectionMode(false);
       setBulkDeleteOpen(false);
       await queryClient.invalidateQueries({ queryKey: ['resources', clusterId] });
       pushToast(`已删除 ${targets.length} 个资源`);
@@ -77,9 +85,10 @@ export function ResourcePage() {
         <div className="resource-toolbar">
           <div className="search-field"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索名称或标签" /></div>
           <div className="filter-select"><SlidersHorizontal size={15} /><SelectMenu aria-label="状态过滤" value={status} options={[{ value: 'all', label: '全部状态' }, ...statuses.map((item) => ({ value: item, label: item }))]} onChange={setStatus} /></div>
+          {canWriteResources && <Button className="batch-mode-button" variant={selectionMode ? 'secondary' : 'ghost'} icon={<ListChecks size={16} />} aria-pressed={selectionMode} onClick={() => { setSelectionMode((current) => !current); setSelected(new Set()); }}>{selectionMode ? '退出批量' : '批量操作'}</Button>}
           {canWriteResources && selected.size > 0 && <Button variant="danger" icon={<Trash2 size={16} />} onClick={() => setBulkDeleteOpen(true)}>删除 {selected.size} 项</Button>}
         </div>
-        {query.error ? <EmptyState icon={<ServerCrash size={24} />} title="无法读取资源" body={query.error instanceof Error ? query.error.message : undefined} action={<Button onClick={() => void query.refetch()}>重试</Button>} /> : <ResourceTable rows={filtered} loading={query.isLoading} selected={selected} onSelected={setSelected} onOpen={setOpenRow} />}
+        {query.error ? <EmptyState icon={<ServerCrash size={24} />} title="无法读取资源" body={query.error instanceof Error ? query.error.message : undefined} action={<Button onClick={() => void query.refetch()}>重试</Button>} /> : <ResourceTable rows={filtered} loading={query.isLoading} selectionMode={selectionMode} selected={selected} onSelected={setSelected} onOpen={setOpenRow} />}
       </section>
       <YamlApplyModal cluster={cluster} open={canWriteResources && applyOpen} onClose={() => setApplyOpen(false)} />
       <ResourceDrawer clusterId={clusterId} descriptor={descriptor} row={openRow} onClose={() => setOpenRow(undefined)} />

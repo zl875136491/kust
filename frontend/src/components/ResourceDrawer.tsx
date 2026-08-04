@@ -208,9 +208,9 @@ export function ResourceDrawer({
         </div>
         <div className="drawer__body">
           {tab === 'overview' && <>
-            <section className="detail-section"><h3>元数据</h3><dl className="detail-grid"><div><dt>名称</dt><dd>{row.name}</dd></div><div><dt>命名空间</dt><dd>{row.namespace || '-'}</dd></div><div><dt>UID</dt><dd className="mono-cell wrap-anywhere">{row.uid}</dd></div><div><dt>创建时间</dt><dd>{row.createdAt ? new Date(row.createdAt).toLocaleString('zh-CN') : '-'}</dd></div></dl></section>
+            <section className="detail-section"><h3>元数据</h3><dl className="detail-grid detail-grid--metadata"><div><dt>名称</dt><dd>{row.name}</dd></div><div><dt>命名空间</dt><dd>{row.namespace || '-'}</dd></div><div><dt>UID</dt><dd className="mono-cell wrap-anywhere">{row.uid}</dd></div><div><dt>创建时间</dt><dd>{row.createdAt ? new Date(row.createdAt).toLocaleString('zh-CN') : '-'}</dd></div></dl></section>
             <section className="detail-section"><h3>标签</h3><div className="labels">{Object.entries(row.labels).map(([key, value]) => <span key={key}>{key}{value ? `=${value}` : ''}</span>)}{Object.keys(row.labels).length === 0 && <em>无</em>}</div></section>
-            {details.length > 0 && <section className="detail-section"><h3>资源信息</h3><dl className="detail-grid">{details.map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{displayValue(value)}</dd></div>)}</dl></section>}
+            {details.length > 0 && <section className="detail-section"><h3>资源信息</h3><dl className="detail-grid detail-grid--resources">{details.map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{displayValue(value)}</dd></div>)}</dl></section>}
           </>}
           {tab === 'yaml' && <div className="yaml-editor yaml-editor--drawer"><div className="yaml-editor__bar"><Braces size={14} /><span>{row.name}.yaml</span></div><textarea value={yaml} onChange={(event) => setYaml(event.target.value)} spellCheck={false} /><div className="yaml-editor__footer"><Button variant="primary" onClick={applyChanges} disabled={busy}>应用更改</Button></div></div>}
           {tab === 'logs' && <div className="logs-view">{logsLoading ? <Spinner label="正在读取日志" /> : <pre>{logs || '暂无日志'}</pre>}</div>}
