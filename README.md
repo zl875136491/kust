@@ -80,7 +80,7 @@ docker compose up --build
 
 Jenkins 需要两个凭据：Harbor 用户名密码 `infra_harbor_auth`，以及 Secret text 类型的 Kubernetes token `tianjin_k8s_admin_token`。`custom-apps` 命名空间需要预先创建 `kust-harbor` image pull secret，以及 `kust-runtime`、`kust-test-runtime` 两个运行时 Secret；后两者包含 `mongodb.txt`、`oa_auth.txt`、`tj_config` 和独立的 `encryption-key`。任何密钥或 kubeconfig 都不进入 Git 或构建产物。
 
-注册用户查询地址通过 Jenkins 的 `USER_INFO_URL` 环境变量传入，部署模板会将其映射为后端读取的 `OA_USER_INFO_URL`。该值不是 Secret，可以在 Jenkinsfile 中按环境调整。
+注册用户查询地址通过 Jenkins 的 `USER_INFO_URL` 环境变量传入，部署模板会将其映射为后端读取的 `OA_USER_INFO_URL`。天津 K8s 的 Pod DNS 无法解析该内网域名，因此 `USER_INFO_HOST` 与 `USER_INFO_HOST_IP` 会为 API Pod 添加应用级 `hostAliases`；这些值均不是 Secret，可以在 Jenkinsfile 中按环境调整。
 
 Kubernetes 模板位于 `deploy/k8s/templates`。`deploy/k8s/apply.sh` 通过 Server-Side Apply 更新资源，等待两个 Deployment 就绪，并通过 Gateway 路由检查前端和数据库健康状态。前端镜像在容器启动时读取 `APP_BASE_PATH`，同一镜像可安全运行在两个不同的 URL 前缀下。
 

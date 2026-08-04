@@ -17,6 +17,8 @@ frontend_image="$3"
 : "${KUBE_API:?KUBE_API is required}"
 : "${KUBE_TOKEN:?KUBE_TOKEN is required}"
 : "${USER_INFO_URL:?USER_INFO_URL is required}"
+: "${USER_INFO_HOST:?USER_INFO_HOST is required}"
+: "${USER_INFO_HOST_IP:?USER_INFO_HOST_IP is required}"
 
 namespace="${KUBE_NAMESPACE:-custom-apps}"
 public_host="${PUBLIC_HOST:-k8s.1oa.com.cn}"
@@ -33,6 +35,23 @@ if ! printf '%s' "$USER_INFO_URL" | grep -Eq '^https?://[^[:space:]]+$'; then
   echo "USER_INFO_URL must be an HTTP(S) URL" >&2
   exit 2
 fi
+
+if ! printf '%s' "$USER_INFO_HOST" | grep -Eq '^[A-Za-z0-9.-]+$'; then
+  echo "USER_INFO_HOST must be a DNS hostname" >&2
+  exit 2
+fi
+
+if ! printf '%s' "$USER_INFO_HOST_IP" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
+  echo "USER_INFO_HOST_IP must be an IPv4 address" >&2
+  exit 2
+fi
+IFS=. read -r ip_a ip_b ip_c ip_d <<< "$USER_INFO_HOST_IP"
+for octet in "$ip_a" "$ip_b" "$ip_c" "$ip_d"; do
+  if ((10#$octet > 255)); then
+    echo "USER_INFO_HOST_IP must be an IPv4 address" >&2
+    exit 2
+  fi
+done
 
 if [ "$dry_run" != "true" ] && [ "$dry_run" != "false" ]; then
   echo "KUBE_DRY_RUN must be true or false" >&2
@@ -84,6 +103,8 @@ render() {
     -e "s|__MONGODB_DATABASE__|${mongodb_database}|g" \
     -e "s|__RUNTIME_SECRET__|${runtime_secret}|g" \
     -e "s|__USER_INFO_URL__|${USER_INFO_URL}|g" \
+    -e "s|__USER_INFO_HOST__|${USER_INFO_HOST}|g" \
+    -e "s|__USER_INFO_HOST_IP__|${USER_INFO_HOST_IP}|g" \
     -e "s|__BACKEND_IMAGE__|${backend_image}|g" \
     -e "s|__FRONTEND_IMAGE__|${frontend_image}|g" \
     "$source" > "$destination"

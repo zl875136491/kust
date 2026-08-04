@@ -23,6 +23,10 @@ spec:
         app.kubernetes.io/instance: __APP_NAME__
         app.kubernetes.io/component: api
     spec:
+      hostAliases:
+        - ip: "__USER_INFO_HOST_IP__"
+          hostnames:
+            - "__USER_INFO_HOST__"
       imagePullSecrets:
         - name: kust-harbor
       containers:

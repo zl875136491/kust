@@ -24,6 +24,8 @@ pipeline {
         PUBLIC_HOST = 'k8s.1oa.com.cn'
         PUBLIC_GATEWAY_IP = '10.17.158.71'
         USER_INFO_URL = 'http://tl.cooacloud.com/springboard_v3/get_user_from_itcode'
+        USER_INFO_HOST = 'tl.cooacloud.com'
+        USER_INFO_HOST_IP = '10.32.129.1'
         BUILDKIT_NO_CLIENT_TOKEN = 'true'
         HTTP_PROXY = 'http://10.17.167.251:7897'
         HTTPS_PROXY = 'http://10.17.167.251:7897'
