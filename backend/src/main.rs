@@ -1,3 +1,6 @@
+mod auth;
+mod auth_routes;
+mod cache;
 mod config;
 mod crypto;
 mod db;
@@ -34,15 +37,57 @@ async fn main() {
         );
     }
 
+    let presets = match state::load_preset_clusters(&config.preset_config_path) {
+        Ok(presets) => presets,
+        Err(error) if config.preset_config_path.exists() => {
+            eprintln!(
+                "preset configuration error at {}: {error}",
+                config.preset_config_path.display()
+            );
+            std::process::exit(2);
+        }
+        Err(error) => {
+            tracing::warn!(%error, path = %config.preset_config_path.display(), "unable to load preset kubeconfigs");
+            Vec::new()
+        }
+    };
+    tracing::info!(count = presets.len(), path = %config.preset_config_path.display(), "loaded preset kubeconfigs");
     let database = db::connect(&config).await.unwrap_or_else(|error| {
         eprintln!("database connection failed: {error}");
         std::process::exit(2);
     });
+    let config = Arc::new(config);
     let state = Arc::new(AppState {
         clusters: database.collection("clusters"),
+        resource_snapshots: database.collection("resource_snapshots"),
+        users: database.collection("users"),
+        roles: database.collection("roles"),
+        sessions: database.collection("sessions"),
+        trusted_devices: database.collection("trusted_devices"),
+        auth_codes: database.collection("auth_codes"),
+        user_settings: database.collection("user_settings"),
         database,
         secrets: SecretBox::new(&config.encryption_key),
+        config: config.clone(),
+        http: reqwest::Client::builder()
+            .user_agent("Kust/0.1")
+            .build()
+            .unwrap_or_else(|error| {
+                eprintln!("unable to create HTTP client: {error}");
+                std::process::exit(2);
+            }),
     });
+    let preset_count = state::sync_preset_clusters(&state, presets)
+        .await
+        .unwrap_or_else(|error| {
+            eprintln!("unable to synchronize preset clusters: {error}");
+            std::process::exit(2);
+        });
+    tracing::info!(
+        count = preset_count,
+        "preset clusters synchronized to MongoDB"
+    );
+    cache::start_background_sync(state.clone());
     let app = routes::router(state, &config).unwrap_or_else(|error| {
         eprintln!("router configuration failed: {error}");
         std::process::exit(2);

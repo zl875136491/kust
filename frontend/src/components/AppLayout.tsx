@@ -1,4 +1,4 @@
-import { Search } from 'lucide-react';
+import { LoaderCircle, Search } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useData } from '../data-context';
@@ -8,8 +8,14 @@ import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { YamlApplyModal } from './YamlApplyModal';
 import { EmptyState, Modal } from './ui';
+import { api } from '../api';
+import type { SearchResult } from '../types';
+import { useAuth } from '../auth-context';
 
 export function AppLayout() {
+  const { user } = useAuth();
+  const canManageClusters = Boolean(user?.roles.includes('admin'));
+  const canWriteResources = Boolean(user?.roles.some((role) => role === 'admin' || role === 'operator'));
   const { clusters } = useData();
   const location = useLocation();
   const navigate = useNavigate();
@@ -24,6 +30,8 @@ export function AppLayout() {
   const [applyOpen, setApplyOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [resourceResults, setResourceResults] = useState<SearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
 
   useEffect(() => {
     if (!routeClusterId) return;
@@ -46,21 +54,34 @@ export function AppLayout() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
+  useEffect(() => {
+    const query = search.trim();
+    if (query.length < 2) { setResourceResults([]); setSearching(false); return; }
+    setSearching(true);
+    const timer = window.setTimeout(() => {
+      api.search(query).then(setResourceResults).catch(() => setResourceResults([])).finally(() => setSearching(false));
+    }, 220);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
   const toggleSidebar = () => {
     const next = !collapsed;
     setCollapsed(next);
     localStorage.setItem('kust-sidebar-collapsed', String(next));
   };
 
-  const searchItems = useMemo(() => {
+  const navigationItems = useMemo(() => {
     const query = search.trim().toLowerCase();
     const navItems = cluster ? navigationGroups.flatMap((group) => [
       { label: group.label, meta: '页面', path: `/cluster/${cluster.id}/${group.path || ''}`.replace(/\/$/, '') },
       ...(group.items || []).map((item) => ({ label: item.label, meta: item.singular, path: `/cluster/${cluster.id}/resources/${item.kind}` })),
     ]) : [];
     const clusterItems = clusters.map((item) => ({ label: item.name, meta: '集群', path: `/cluster/${item.id}` }));
-    return [...clusterItems, ...navItems].filter((item) => !query || `${item.label} ${item.meta}`.toLowerCase().includes(query)).slice(0, 12);
+    return [...clusterItems, ...navItems].filter((item) => !query || `${item.label} ${item.meta}`.toLowerCase().includes(query)).slice(0, query ? 5 : 12);
   }, [cluster, clusters, search]);
+  const searchItems: Array<{ label: string; meta: string; path: string; status?: string }> = search.trim().length >= 2
+    ? [...resourceResults.map((item) => ({ label: item.title, meta: item.subtitle, path: item.path, status: item.status })), ...navigationItems]
+    : navigationItems;
 
   return (
     <div className={`app-shell ${collapsed ? 'sidebar-collapsed' : ''}`}>
@@ -72,16 +93,19 @@ export function AppLayout() {
         onCloseMobile={() => setMobileOpen(false)}
         onAddCluster={() => setAddClusterOpen(true)}
         onApply={() => setApplyOpen(true)}
+        canManageClusters={canManageClusters}
+        canWriteResources={canWriteResources}
       />
       <TopBar cluster={cluster} onMenu={() => setMobileOpen(true)} onSearch={() => setSearchOpen(true)} />
       <main className="app-main"><Outlet context={{ cluster }} /></main>
-      <AddClusterModal open={addClusterOpen} onClose={() => setAddClusterOpen(false)} />
-      {cluster && <YamlApplyModal cluster={cluster} open={applyOpen} onClose={() => setApplyOpen(false)} />}
+      <AddClusterModal open={canManageClusters && addClusterOpen} onClose={() => setAddClusterOpen(false)} />
+      {cluster && canWriteResources && <YamlApplyModal cluster={cluster} open={applyOpen} onClose={() => setApplyOpen(false)} />}
       <Modal open={searchOpen} onClose={() => setSearchOpen(false)} title="全局搜索" width="620px">
         <div className="command-search"><Search size={18} /><input autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder="集群、资源或页面" /></div>
         <div className="command-results">
-          {searchItems.map((item) => <button key={`${item.meta}:${item.label}:${item.path}`} onClick={() => { navigate(item.path); setSearchOpen(false); setSearch(''); }}><span>{item.label}</span><small>{item.meta}</small></button>)}
-          {searchItems.length === 0 && <EmptyState icon={<Search size={22} />} title="没有匹配项" />}
+          {searching && <div className="command-searching"><LoaderCircle className="spin" size={17} />正在搜索 MongoDB 资源索引</div>}
+          {searchItems.map((item) => <button key={`${item.meta}:${item.label}:${item.path}`} onClick={() => { navigate(item.path); setSearchOpen(false); setSearch(''); }}><span>{item.label}{item.status && <i>{item.status}</i>}</span><small>{item.meta}</small></button>)}
+          {!searching && searchItems.length === 0 && <EmptyState icon={<Search size={22} />} title="没有匹配项" />}
         </div>
       </Modal>
     </div>

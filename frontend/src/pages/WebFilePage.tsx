@@ -52,7 +52,7 @@ export function WebFilePage() {
   const [searchParams] = useSearchParams();
   const container = searchParams.get('container') || undefined;
   const navigate = useNavigate();
-  const { mode, clusters } = useData();
+  const { clusters } = useData();
   const { resolved } = useThemeMode();
   const { pushToast } = useToast();
   const [path, setPath] = useState('/');
@@ -74,7 +74,6 @@ export function WebFilePage() {
   const selectedName = selectedPath?.split('/').filter(Boolean).pop();
 
   const loadTree = useCallback(async (nextPath: string) => {
-    if (mode !== 'live') return;
     setLoadingTree(true);
     setError(undefined);
     try {
@@ -86,11 +85,11 @@ export function WebFilePage() {
     } finally {
       setLoadingTree(false);
     }
-  }, [clusterId, container, mode, namespace, pod]);
+  }, [clusterId, container, namespace, pod]);
 
   useEffect(() => {
-    if (mode === 'live' && cluster) void loadTree('/');
-  }, [cluster, loadTree, mode]);
+    if (cluster) void loadTree('/');
+  }, [cluster, loadTree]);
 
   const openEntry = async (entry: FileEntry) => {
     if (entry.kind === 'directory') {
@@ -190,9 +189,6 @@ export function WebFilePage() {
     }))];
   }, [path]);
 
-  if (mode !== 'live') {
-    return <div className="page"><EmptyState icon={<AlertCircle size={24} />} title="WebFile 需要实时后端" body="请在设置中切换到实时后端，并选择一个已接入的集群。" /></div>;
-  }
   if (!cluster) return <div className="page"><EmptyState icon={<AlertCircle size={24} />} title="集群不存在" /></div>;
 
   return (
@@ -204,7 +200,6 @@ export function WebFilePage() {
           <p className="page-subtitle">WebFile{container ? ` · ${container}` : ''}</p>
         </div>
         <div className="page-actions">
-          <span className="tool-connection is-connected"><i />实时后端</span>
           <IconButton label="刷新目录" onClick={() => void loadTree(path)}><RefreshCw size={17} /></IconButton>
           <IconButton label="返回资源详情" onClick={requestClose}><ArrowLeft size={17} /></IconButton>
         </div>

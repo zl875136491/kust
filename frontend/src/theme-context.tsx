@@ -1,11 +1,12 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ThemeMode } from './types';
 
 interface ThemeContextValue {
   mode: ThemeMode;
   resolved: 'light' | 'dark';
   setMode: (mode: ThemeMode) => void;
+  hydrateMode: (mode: ThemeMode) => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -39,7 +40,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     setModeState(nextMode);
   };
 
-  const value = useMemo(() => ({ mode, resolved, setMode }), [mode, resolved]);
+  const hydrateMode = useCallback((nextMode: ThemeMode) => {
+    localStorage.setItem('kust-theme', nextMode);
+    setModeState(nextMode);
+  }, []);
+  const value = useMemo(() => ({ mode, resolved, setMode, hydrateMode }), [hydrateMode, mode, resolved]);
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 

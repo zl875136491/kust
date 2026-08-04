@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { AlertTriangle, Check, Info, X } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, Info, X } from 'lucide-react';
 import {
   createContext,
   type ButtonHTMLAttributes,
@@ -9,6 +9,7 @@ import {
   useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { createPortal } from 'react-dom';
@@ -46,6 +47,158 @@ export function IconButton({ label, active, className = '', children, ...props }
     >
       {children}
     </button>
+  );
+}
+
+export interface SelectMenuOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
+}
+
+interface SelectMenuProps {
+  value: string;
+  options: SelectMenuOption[];
+  onChange: (value: string) => void;
+  label?: string;
+  className?: string;
+  'aria-label'?: string;
+}
+
+/** Cross-platform glass select; native menus vary substantially between browsers and OSes. */
+export function SelectMenu({ value, options, onChange, label, className = '', 'aria-label': ariaLabel }: SelectMenuProps) {
+  const [open, setOpen] = useState(false);
+  const [highlighted, setHighlighted] = useState(() => Math.max(0, options.findIndex((option) => option.value === value)));
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const listId = useId();
+  const selected = options.find((option) => option.value === value) || options[0];
+
+  useEffect(() => {
+    const next = options.findIndex((option) => option.value === value);
+    setHighlighted(next >= 0 ? next : 0);
+  }, [options, value]);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!triggerRef.current?.contains(target) && !popoverRef.current?.contains(target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', closeOnOutside);
+    return () => document.removeEventListener('mousedown', closeOnOutside);
+  }, [open]);
+
+  useEscapeLayer(open, () => setOpen(false), 90);
+
+  const choose = (option?: SelectMenuOption) => {
+    if (!option) return;
+    if (option.disabled) return;
+    onChange(option.value);
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
+
+  const moveHighlight = (direction: 1 | -1) => {
+    if (!options.length) return;
+    let next = highlighted;
+    for (let i = 0; i < options.length; i += 1) {
+      next = (next + direction + options.length) % options.length;
+      if (!options[next]?.disabled) break;
+    }
+    setHighlighted(next);
+  };
+
+  const onTriggerKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (!open) setOpen(true);
+      moveHighlight(event.key === 'ArrowDown' ? 1 : -1);
+    } else if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      if (open) choose(options[highlighted]); else setOpen(true);
+    } else if (event.key === 'Escape' && open) {
+      event.preventDefault();
+      setOpen(false);
+    }
+  };
+
+  const [position, setPosition] = useState<{ left: number; top: number; width: number; maxHeight: number }>();
+  const updatePosition = useCallback(() => {
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const width = Math.max(rect.width, 170);
+    const availableBelow = window.innerHeight - rect.bottom - 12;
+    const availableAbove = rect.top - 12;
+    const contentHeight = Math.max(140, Math.min(320, options.length * 36 + 12));
+    const maxHeight = Math.max(140, Math.min(320, Math.max(availableBelow, availableAbove)));
+    const above = availableBelow < Math.min(180, contentHeight) && availableAbove > availableBelow;
+    setPosition({
+      left: Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - width - 8)),
+      top: above ? Math.max(8, rect.top - Math.min(contentHeight, maxHeight) - 6) : rect.bottom + 6,
+      width,
+      maxHeight,
+    });
+  }, [options.length]);
+
+  useEffect(() => {
+    if (!open) return;
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [open, updatePosition]);
+
+  return (
+    <div className={`select-menu ${className}`}>
+      {label && <span className="select-menu__label">{label}</span>}
+      <button
+        ref={triggerRef}
+        type="button"
+        className="select-menu__trigger"
+        role="combobox"
+        aria-label={ariaLabel || label}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={open ? listId : undefined}
+        onClick={() => setOpen((current) => !current)}
+        onKeyDown={onTriggerKeyDown}
+      >
+        <span className="select-menu__value">{selected?.label || '请选择'}</span>
+        <ChevronDown size={14} className={`select-menu__chevron ${open ? 'is-open' : ''}`} aria-hidden="true" />
+      </button>
+      {open && createPortal(
+        <div
+          ref={popoverRef}
+          id={listId}
+          className="select-menu__popover"
+          role="listbox"
+          aria-label={ariaLabel || label}
+          style={{ left: position?.left || 8, top: position?.top || 8, width: position?.width || 200, maxHeight: position?.maxHeight || 300 }}
+        >
+          {options.map((option, index) => (
+            <button
+              type="button"
+              role="option"
+              aria-selected={option.value === value}
+              aria-disabled={option.disabled || undefined}
+              disabled={option.disabled}
+              className={`select-menu__option ${option.value === value ? 'is-selected' : ''} ${index === highlighted ? 'is-highlighted' : ''}`}
+              key={option.value}
+              onMouseEnter={() => setHighlighted(index)}
+              onClick={() => choose(option)}
+            >
+              <span>{option.label}</span>
+              {option.value === value && <Check size={14} aria-hidden="true" />}
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </div>
   );
 }
 

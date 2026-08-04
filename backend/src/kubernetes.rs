@@ -154,6 +154,7 @@ fn deployment_row(item: &Deployment) -> ResourceRow {
         "available": available,
         "desired": desired,
         "strategy": item.spec.as_ref().and_then(|spec| spec.strategy.as_ref()).and_then(|strategy| strategy.type_.clone()),
+        "selector": item.spec.as_ref().map(|spec| spec.selector.match_labels.clone().unwrap_or_default()).unwrap_or_default(),
     });
     row
 }
@@ -181,6 +182,7 @@ fn stateful_set_row(item: &StatefulSet) -> ResourceRow {
         "serviceName": item.spec.as_ref().map(|spec| spec.service_name.clone()),
         "currentRevision": item.status.as_ref().and_then(|status| status.current_revision.clone()),
         "updateRevision": item.status.as_ref().and_then(|status| status.update_revision.clone()),
+        "selector": item.spec.as_ref().map(|spec| spec.selector.match_labels.clone().unwrap_or_default()).unwrap_or_default(),
     });
     row
 }
@@ -207,6 +209,7 @@ fn daemon_set_row(item: &DaemonSet) -> ResourceRow {
     row.details = json!({
         "available": item.status.as_ref().and_then(|status| status.number_available),
         "updated": item.status.as_ref().and_then(|status| status.updated_number_scheduled),
+        "selector": item.spec.as_ref().map(|spec| spec.selector.match_labels.clone().unwrap_or_default()).unwrap_or_default(),
     });
     row
 }
@@ -230,7 +233,10 @@ fn replica_set_row(item: &ReplicaSet) -> ResourceRow {
     }
     .into();
     row.ready = Some(format!("{ready}/{desired}"));
-    row.details = json!({ "desired": desired });
+    row.details = json!({
+        "desired": desired,
+        "selector": item.spec.as_ref().map(|spec| spec.selector.match_labels.clone().unwrap_or_default()).unwrap_or_default(),
+    });
     row
 }
 
@@ -331,6 +337,7 @@ fn service_row(item: &Service) -> ResourceRow {
         "clusterIP": spec.and_then(|spec| spec.cluster_ip.clone()),
         "externalIPs": spec.and_then(|spec| spec.external_ips.clone()).unwrap_or_default(),
         "ports": spec.and_then(|spec| spec.ports.clone()).unwrap_or_default(),
+        "selector": spec.and_then(|spec| spec.selector.clone()).unwrap_or_default(),
     });
     row
 }
@@ -348,6 +355,7 @@ fn ingress_row(item: &Ingress) -> ResourceRow {
         "hosts": hosts,
         "className": item.spec.as_ref().and_then(|spec| spec.ingress_class_name.clone()),
         "loadBalancer": item.status.as_ref().and_then(|status| status.load_balancer.as_ref()).and_then(|lb| lb.ingress.clone()).unwrap_or_default(),
+        "backends": item.spec.as_ref().and_then(|spec| spec.rules.as_ref()).map(|rules| rules.iter().flat_map(|rule| rule.http.as_ref().into_iter().flat_map(|http| http.paths.iter().map(|path| path.backend.service.as_ref().map(|service| service.name.clone()).unwrap_or_default()))).filter(|name| !name.is_empty()).collect::<Vec<_>>()).unwrap_or_default(),
     });
     row
 }
@@ -466,6 +474,29 @@ fn dynamic_row(item: &DynamicObject, kind: &str) -> ResourceRow {
         .and_then(Value::as_array)
         .map(Vec::len)
         .unwrap_or_default();
+    let backend_refs = item
+        .data
+        .get("spec")
+        .and_then(|spec| spec.get("rules"))
+        .and_then(Value::as_array)
+        .map(|rules| {
+            rules
+                .iter()
+                .flat_map(|rule| {
+                    rule.get("backendRefs")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                })
+                .filter_map(|backend| {
+                    backend
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     ResourceRow {
         uid: metadata
             .uid
@@ -488,6 +519,7 @@ fn dynamic_row(item: &DynamicObject, kind: &str) -> ResourceRow {
             "parentRefs": parents,
             "rules": rules,
             "conditions": conditions,
+            "backendRefs": backend_refs,
         }),
     }
 }
@@ -636,6 +668,7 @@ pub async fn list_resources(
     })
 }
 
+#[allow(dead_code)]
 pub async fn overview(client: Client) -> Result<OverviewResponse, AppError> {
     let pods = list_resources(client.clone(), "pods", None, None).await?;
     let nodes = list_resources(client.clone(), "nodes", None, None).await?;

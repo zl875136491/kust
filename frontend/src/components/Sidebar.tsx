@@ -22,6 +22,8 @@ interface SidebarProps {
   onCloseMobile: () => void;
   onAddCluster: () => void;
   onApply: () => void;
+  canManageClusters: boolean;
+  canWriteResources: boolean;
 }
 
 export function Sidebar({
@@ -32,6 +34,8 @@ export function Sidebar({
   onCloseMobile,
   onAddCluster,
   onApply,
+  canManageClusters,
+  canWriteResources,
 }: SidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -156,19 +160,19 @@ export function Sidebar({
         </nav>
 
         <div className="sidebar__footer">
-          {cluster ? (
+          {cluster && canWriteResources ? (
             !expandedView ? (
               <IconButton label="创建资源" onClick={onApply}><CirclePlus size={20} /></IconButton>
             ) : (
               <Button variant="primary" icon={<CirclePlus size={17} />} onClick={onApply}>创建资源</Button>
             )
-          ) : (
+          ) : !cluster && canManageClusters ? (
             !expandedView ? (
               <IconButton label="添加集群" onClick={onAddCluster}><CirclePlus size={20} /></IconButton>
             ) : (
               <Button variant="primary" icon={<CirclePlus size={17} />} onClick={onAddCluster}>添加集群</Button>
             )
-          )}
+          ) : null}
           <NavLink to="/notifications" className="nav-item" onClick={closeOnMobile} title={!expandedView ? '通知' : undefined}>
             <Bell size={18} /><span>通知</span>
           </NavLink>

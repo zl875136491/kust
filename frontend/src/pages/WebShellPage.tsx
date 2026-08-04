@@ -15,7 +15,7 @@ export function WebShellPage() {
   const [searchParams] = useSearchParams();
   const container = searchParams.get('container') || undefined;
   const navigate = useNavigate();
-  const { mode, clusters } = useData();
+  const { clusters } = useData();
   const { resolved } = useThemeMode();
   const terminalHost = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | undefined>(undefined);
@@ -25,7 +25,7 @@ export function WebShellPage() {
   const cluster = clusters.find((item) => item.id === clusterId);
 
   useEffect(() => {
-    if (!terminalHost.current || mode !== 'live') return;
+    if (!terminalHost.current) return;
     const terminal = new Terminal({
       cursorBlink: true,
       convertEol: true,
@@ -82,11 +82,7 @@ export function WebShellPage() {
       socketRef.current = undefined;
       terminalRef.current = undefined;
     };
-  }, [cluster?.id, clusterId, container, mode, namespace, pod, resolved, fitVersion]);
-
-  if (mode !== 'live') {
-    return <div className="page"><EmptyState icon={<TerminalSquare size={24} />} title="WebShell 需要实时后端" body="请在设置中切换到实时后端，并选择一个已接入的集群。" /></div>;
-  }
+  }, [cluster?.id, clusterId, container, namespace, pod, resolved, fitVersion]);
   if (!cluster) {
     return <div className="page"><EmptyState icon={<CircleAlert size={24} />} title="集群不存在" /></div>;
   }

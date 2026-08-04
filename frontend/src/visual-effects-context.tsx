@@ -11,6 +11,7 @@ export interface VisualEffects {
 interface VisualEffectsContextValue {
   effects: VisualEffects;
   setEffect: (effect: keyof VisualEffects, enabled: boolean) => void;
+  hydrateEffects: (effects: VisualEffects) => void;
 }
 
 const STORAGE_KEY = 'kust-visual-effects';
@@ -47,8 +48,9 @@ export function VisualEffectsProvider({ children }: { children: React.ReactNode 
   const setEffect = useCallback((effect: keyof VisualEffects, enabled: boolean) => {
     setEffects((current) => ({ ...current, [effect]: enabled }));
   }, []);
+  const hydrateEffects = useCallback((next: VisualEffects) => setEffects(next), []);
 
-  const value = useMemo(() => ({ effects, setEffect }), [effects, setEffect]);
+  const value = useMemo(() => ({ effects, setEffect, hydrateEffects }), [effects, hydrateEffects, setEffect]);
   return <VisualEffectsContext.Provider value={value}>{children}</VisualEffectsContext.Provider>;
 }
 

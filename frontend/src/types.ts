@@ -1,5 +1,4 @@
 export type ThemeMode = 'system' | 'light' | 'dark';
-export type DataMode = 'demo' | 'live';
 
 export interface Cluster {
   id: string;
@@ -13,6 +12,9 @@ export interface Cluster {
   lastConnectedAt?: string;
   warnings?: number;
   accent?: string;
+  preset?: boolean;
+  readOnly: boolean;
+  source: 'preset' | 'user' | string;
 }
 
 export interface CreateClusterPayload {
@@ -20,6 +22,13 @@ export interface CreateClusterPayload {
   description: string;
   context?: string;
   kubeconfig: string;
+}
+
+export interface UpdateClusterPayload {
+  name?: string;
+  description?: string;
+  context?: string;
+  kubeconfig?: string;
 }
 
 export interface ResourceRow {
@@ -75,4 +84,84 @@ export interface FileEntry {
 export interface FileTreeResponse {
   path: string;
   entries: FileEntry[];
+}
+
+export interface User {
+  id: string;
+  username: string;
+  displayName: string;
+  realName: string;
+  email?: string;
+  itcode?: string;
+  source: 'local' | 'oa' | string;
+  roles: string[];
+  disabled: boolean;
+  passwordUnset: boolean;
+  twoFactorEnabled: boolean;
+  twoFactorRequired: boolean;
+  twoFactorRememberDays: number;
+}
+
+export interface RegistrationProfile {
+  username: string;
+  displayName: string;
+  realName: string;
+  email?: string;
+  itcode: string;
+  source: 'oa' | string;
+}
+
+export type AuthNext = 'authenticated' | 'enroll' | 'two_factor';
+
+export interface AuthState {
+  user: User;
+  next: AuthNext;
+  token?: string;
+  trustedDeviceToken?: string;
+}
+
+export interface UserSettings {
+  theme: ThemeMode;
+  pointerHighlight: boolean;
+  refraction: boolean;
+  backdropBlur: boolean;
+  hoverMotion: boolean;
+  autoRefresh: boolean;
+  pageSize: number;
+  twoFactorEnabled: boolean;
+  twoFactorRequired: boolean;
+  twoFactorRememberDays: number;
+}
+
+export interface SearchResult {
+  id: string;
+  title: string;
+  subtitle: string;
+  category: string;
+  clusterId?: string;
+  path: string;
+  status?: string;
+}
+
+export interface ResourceMapNode {
+  id: string;
+  label: string;
+  kind: string;
+  namespace?: string;
+  status: string;
+  group: 'entry' | 'network' | 'workload' | 'pod' | 'node' | 'storage' | string;
+  resourceKind: string;
+}
+
+export interface ResourceMapEdge {
+  id: string;
+  source: string;
+  target: string;
+  relation: string;
+}
+
+export interface ResourceMapResponse {
+  nodes: ResourceMapNode[];
+  edges: ResourceMapEdge[];
+  syncedAt?: string;
 }

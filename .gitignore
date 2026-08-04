@@ -21,6 +21,10 @@ dist/
 # Local configuration
 .env
 .env.local
+mongodb.txt
+oa_auth.txt
+harbor.txt
+tj_config
 .DS_Store
 
 # IDE and coverage output

@@ -16,6 +16,11 @@ import { WebFilePage } from './pages/WebFilePage';
 import { WebShellPage } from './pages/WebShellPage';
 import { ThemeProvider } from './theme-context';
 import { VisualEffectsProvider } from './visual-effects-context';
+import { AuthProvider } from './auth-context';
+import { AuthGate, GuestGate } from './components/AuthGate';
+import { ForgotPasswordPage, LoginPage, RegisterPage, ResetPasswordPage, TwoFactorPage } from './pages/AuthPages';
+import { PreferencesProvider } from './preferences-context';
+import { APP_BASE_PATH } from './runtime-config';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -29,26 +34,39 @@ export default function App() {
       <VisualEffectsProvider>
         <LiquidGlassSystem />
         <QueryClientProvider client={queryClient}>
-          <DataProvider>
-            <ToastProvider>
-              <BrowserRouter>
+          <AuthProvider>
+            <DataProvider>
+              <PreferencesProvider>
+                <ToastProvider>
+                  <BrowserRouter basename={APP_BASE_PATH || undefined}>
                 <Routes>
-                  <Route element={<AppLayout />}>
-                    <Route index element={<HomePage />} />
-                    <Route path="notifications" element={<NotificationsPage />} />
-                    <Route path="settings" element={<SettingsPage />} />
-                    <Route path="cluster/:clusterId" element={<OverviewPage />} />
-                    <Route path="cluster/:clusterId/map" element={<MapPage />} />
-                    <Route path="cluster/:clusterId/workloads" element={<WorkloadsPage />} />
-                    <Route path="cluster/:clusterId/resources/:kind" element={<ResourcePage />} />
-                    <Route path="cluster/:clusterId/pods/:namespace/:pod/shell" element={<WebShellPage />} />
-                    <Route path="cluster/:clusterId/pods/:namespace/:pod/files" element={<WebFilePage />} />
-                    <Route path="*" element={<NotFoundPage />} />
+                  <Route element={<GuestGate />}>
+                    <Route path="login" element={<LoginPage />} />
+                    <Route path="register" element={<RegisterPage />} />
+                    <Route path="forgot-password" element={<ForgotPasswordPage />} />
+                    <Route path="reset-password" element={<ResetPasswordPage />} />
+                  </Route>
+                  <Route path="two-factor" element={<TwoFactorPage />} />
+                  <Route element={<AuthGate />}>
+                    <Route element={<AppLayout />}>
+                      <Route index element={<HomePage />} />
+                      <Route path="notifications" element={<NotificationsPage />} />
+                      <Route path="settings" element={<SettingsPage />} />
+                      <Route path="cluster/:clusterId" element={<OverviewPage />} />
+                      <Route path="cluster/:clusterId/map" element={<MapPage />} />
+                      <Route path="cluster/:clusterId/workloads" element={<WorkloadsPage />} />
+                      <Route path="cluster/:clusterId/resources/:kind" element={<ResourcePage />} />
+                      <Route path="cluster/:clusterId/pods/:namespace/:pod/shell" element={<WebShellPage />} />
+                      <Route path="cluster/:clusterId/pods/:namespace/:pod/files" element={<WebFilePage />} />
+                      <Route path="*" element={<NotFoundPage />} />
+                    </Route>
                   </Route>
                 </Routes>
-              </BrowserRouter>
-            </ToastProvider>
-          </DataProvider>
+                  </BrowserRouter>
+                </ToastProvider>
+              </PreferencesProvider>
+            </DataProvider>
+          </AuthProvider>
         </QueryClientProvider>
       </VisualEffectsProvider>
     </ThemeProvider>

@@ -1,22 +1,29 @@
 import type {
   Cluster,
   CreateClusterPayload,
+  UpdateClusterPayload,
   Overview,
   ResourceListResponse,
   ResourceRow,
   FileTreeResponse,
+  AuthState, RegistrationProfile, ResourceMapResponse, SearchResult, User, UserSettings,
 } from './types';
+import { APP_BASE_PATH } from './runtime-config';
 
-const API_ROOT = import.meta.env.VITE_API_URL || '/api';
+const API_ROOT = import.meta.env.VITE_API_URL || `${APP_BASE_PATH}/api`;
 const WS_ROOT = API_ROOT.startsWith('http')
   ? API_ROOT.replace(/^http/, 'ws')
   : (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host + API_ROOT;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = localStorage.getItem('kust-session-token');
+  const trusted = localStorage.getItem('kust-trusted-device');
   const response = await fetch(`${API_ROOT}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(trusted ? { 'X-Kust-Trusted-Device': trusted } : {}),
       ...init?.headers,
     },
   });
@@ -32,9 +39,30 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => request<{ status: string; database: string }>('/health'),
+  registrationProfile: (username: string) => request<RegistrationProfile>('/auth/register/lookup', { method: 'POST', body: JSON.stringify({ username }) }),
+  register: (username: string, password: string, passwordConfirmation: string) => request<AuthState>('/auth/register', { method: 'POST', body: JSON.stringify({ username, password, passwordConfirmation }) }),
+  login: (username: string, password: string) => request<AuthState>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
+  me: () => request<AuthState>('/auth/me'),
+  logout: () => request<void>('/auth/logout', { method: 'POST' }),
+  oaLogin: (username: string) => request<{ message: string; debugCode?: string }>('/auth/oa/request', { method: 'POST', body: JSON.stringify({ username }) }),
+  codeLogin: (username: string, code: string) => request<AuthState>('/auth/code', { method: 'POST', body: JSON.stringify({ username, code }) }),
+  requestPasswordReset: (username: string) => request<{ message: string; debugCode?: string }>('/auth/password/request', { method: 'POST', body: JSON.stringify({ username }) }),
+  resetPassword: (username: string, code: string, newPassword: string) => request<void>('/auth/password/reset', { method: 'POST', body: JSON.stringify({ username, code, newPassword }) }),
+  totpSetup: () => request<{ secret: string; uri: string }>('/auth/2fa/setup'),
+  totpVerify: (code: string) => request<AuthState>('/auth/2fa/verify', { method: 'POST', body: JSON.stringify({ code }) }),
+  settings: () => request<UserSettings>('/settings'),
+  updateSettings: (settings: UserSettings) => request<UserSettings>('/settings', { method: 'PUT', body: JSON.stringify(settings) }),
+  users: () => request<User[]>('/admin/users'),
+  updateRoles: (id: string, roles: string[]) => request<User>(`/admin/users/${id}/roles`, { method: 'PATCH', body: JSON.stringify({ roles }) }),
+  adminResetCode: (id: string) => request<{ username: string; code: string; expiresInMinutes: number }>(`/admin/users/${id}/reset-code`, { method: 'POST' }),
+  changePassword: (currentPassword: string, newPassword: string) => request<void>('/auth/password/change', { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) }),
+  search: (q: string, clusterId?: string) => { const params = new URLSearchParams({ q }); if (clusterId) params.set('clusterId', clusterId); return request<SearchResult[]>(`/search?${params}`); },
+  resourceMap: (clusterId: string) => request<ResourceMapResponse>(`/clusters/${clusterId}/map`),
   clusters: () => request<Cluster[]>('/clusters'),
   createCluster: (payload: CreateClusterPayload) =>
     request<Cluster>('/clusters', { method: 'POST', body: JSON.stringify(payload) }),
+  updateCluster: (clusterId: string, payload: UpdateClusterPayload) =>
+    request<Cluster>(`/clusters/${clusterId}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   deleteCluster: (clusterId: string) =>
     request<void>(`/clusters/${clusterId}`, { method: 'DELETE' }),
   overview: (clusterId: string) => request<Overview>(`/clusters/${clusterId}/overview`),
@@ -100,7 +128,9 @@ export const api = {
     );
   },
   shellUrl: (clusterId: string, namespace: string, pod: string, container?: string) => {
-    const query = container ? '?container=' + encodeURIComponent(container) : '';
+    const params = new URLSearchParams({ accessToken: localStorage.getItem('kust-session-token') || '' });
+    if (container) params.set('container', container);
+    const query = `?${params}`;
     return WS_ROOT + '/clusters/' + clusterId + '/pods/' + encodeURIComponent(namespace) + '/' + encodeURIComponent(pod) + '/shell' + query;
   },
 };

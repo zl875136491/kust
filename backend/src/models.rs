@@ -14,6 +14,14 @@ pub struct ClusterDocument {
     pub server: String,
     pub kubernetes_version: Option<String>,
     pub kubeconfig_encrypted: String,
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub read_only: bool,
+    #[serde(default)]
+    pub preset_key: Option<String>,
+    #[serde(default)]
+    pub owner_user_id: Option<ObjectId>,
     pub created_at: DateTime,
     pub updated_at: DateTime,
     pub last_connected_at: Option<DateTime>,
@@ -29,6 +37,15 @@ pub struct CreateClusterRequest {
     pub kubeconfig: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateClusterRequest {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub context: Option<String>,
+    pub kubeconfig: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClusterResponse {
@@ -41,6 +58,10 @@ pub struct ClusterResponse {
     pub status: String,
     pub created_at: String,
     pub last_connected_at: Option<String>,
+    #[serde(default)]
+    pub preset: bool,
+    pub read_only: bool,
+    pub source: String,
 }
 
 impl From<ClusterDocument> for ClusterResponse {
@@ -49,6 +70,11 @@ impl From<ClusterDocument> for ClusterResponse {
             "connected"
         } else {
             "unknown"
+        };
+        let source = if value.source.is_empty() {
+            "user".to_string()
+        } else {
+            value.source.clone()
         };
         Self {
             id: value.id.to_hex(),
@@ -62,11 +88,14 @@ impl From<ClusterDocument> for ClusterResponse {
             last_connected_at: value
                 .last_connected_at
                 .and_then(|date| date.try_to_rfc3339_string().ok()),
+            preset: source == "preset",
+            read_only: value.read_only,
+            source,
         }
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResourceRow {
     pub uid: String,
@@ -82,14 +111,14 @@ pub struct ResourceRow {
     pub details: Value,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResourceListResponse {
     pub kind: String,
     pub items: Vec<ResourceRow>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OverviewResponse {
     pub cpu_percent: Option<f64>,
@@ -100,7 +129,7 @@ pub struct OverviewResponse {
     pub events: Vec<ResourceRow>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatusCount {
     pub healthy: usize,
@@ -209,4 +238,312 @@ pub struct DirectoryRequest {
 #[serde(rename_all = "camelCase")]
 pub struct ShellQuery {
     pub container: Option<String>,
+    pub access_token: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ResourceSnapshotDocument {
+    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
+    pub id: Option<ObjectId>,
+    pub cluster_id: ObjectId,
+    pub kind: String,
+    pub response: ResourceListResponse,
+    pub synced_at: DateTime,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RoleDocument {
+    #[serde(rename = "_id")]
+    pub id: ObjectId,
+    pub name: String,
+    pub label: String,
+    pub permissions: Vec<String>,
+    pub built_in: bool,
+    pub created_at: DateTime,
+    pub updated_at: DateTime,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UserDocument {
+    #[serde(rename = "_id")]
+    pub id: ObjectId,
+    pub username: String,
+    pub display_name: String,
+    pub real_name: String,
+    pub email: Option<String>,
+    pub itcode: Option<String>,
+    pub source: String,
+    pub password_hash: String,
+    pub password_unset: bool,
+    pub roles: Vec<String>,
+    pub disabled: bool,
+    pub totp_secret_encrypted: Option<String>,
+    pub totp_enabled: bool,
+    pub totp_required_since: Option<DateTime>,
+    pub two_factor_remember_days: i32,
+    pub created_at: DateTime,
+    pub updated_at: DateTime,
+    pub last_login_at: Option<DateTime>,
+}
+
+impl UserDocument {
+    pub fn is_admin(&self) -> bool {
+        self.roles.iter().any(|role| role == "admin")
+    }
+
+    pub fn response(&self) -> UserResponse {
+        UserResponse {
+            id: self.id.to_hex(),
+            username: self.username.clone(),
+            display_name: self.display_name.clone(),
+            real_name: self.real_name.clone(),
+            email: self.email.clone(),
+            itcode: self.itcode.clone(),
+            source: self.source.clone(),
+            roles: self.roles.clone(),
+            disabled: self.disabled,
+            password_unset: self.password_unset,
+            two_factor_enabled: self.totp_enabled,
+            two_factor_required: self.is_admin(),
+            two_factor_remember_days: self.two_factor_remember_days,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserResponse {
+    pub id: String,
+    pub username: String,
+    pub display_name: String,
+    pub real_name: String,
+    pub email: Option<String>,
+    pub itcode: Option<String>,
+    pub source: String,
+    pub roles: Vec<String>,
+    pub disabled: bool,
+    pub password_unset: bool,
+    pub two_factor_enabled: bool,
+    pub two_factor_required: bool,
+    pub two_factor_remember_days: i32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SessionDocument {
+    #[serde(rename = "_id")]
+    pub id: ObjectId,
+    pub token_hash: String,
+    pub user_id: ObjectId,
+    pub stage: String,
+    pub created_at: DateTime,
+    pub expires_at: DateTime,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TrustedDeviceDocument {
+    #[serde(rename = "_id")]
+    pub id: ObjectId,
+    pub token_hash: String,
+    pub user_id: ObjectId,
+    pub created_at: DateTime,
+    pub expires_at: DateTime,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AuthCodeDocument {
+    #[serde(rename = "_id")]
+    pub id: ObjectId,
+    pub code_hash: String,
+    pub user_id: ObjectId,
+    pub purpose: String,
+    pub created_at: DateTime,
+    pub expires_at: DateTime,
+    pub used_at: Option<DateTime>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UserSettingsDocument {
+    #[serde(rename = "_id")]
+    pub id: ObjectId,
+    pub user_id: ObjectId,
+    pub theme: String,
+    pub pointer_highlight: bool,
+    pub refraction: bool,
+    pub backdrop_blur: bool,
+    pub hover_motion: bool,
+    pub auto_refresh: bool,
+    pub page_size: i32,
+    pub updated_at: DateTime,
+}
+
+impl UserSettingsDocument {
+    pub fn new(user_id: ObjectId) -> Self {
+        Self {
+            id: ObjectId::new(),
+            user_id,
+            theme: "system".into(),
+            pointer_highlight: true,
+            refraction: true,
+            backdrop_blur: true,
+            hover_motion: true,
+            auto_refresh: true,
+            page_size: 25,
+            updated_at: DateTime::now(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserSettingsResponse {
+    pub theme: String,
+    pub pointer_highlight: bool,
+    pub refraction: bool,
+    pub backdrop_blur: bool,
+    pub hover_motion: bool,
+    pub auto_refresh: bool,
+    pub page_size: i32,
+    pub two_factor_enabled: bool,
+    pub two_factor_required: bool,
+    pub two_factor_remember_days: i32,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateSettingsRequest {
+    pub theme: String,
+    pub pointer_highlight: bool,
+    pub refraction: bool,
+    pub backdrop_blur: bool,
+    pub hover_motion: bool,
+    pub auto_refresh: bool,
+    pub page_size: i32,
+    pub two_factor_enabled: bool,
+    pub two_factor_remember_days: i32,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterRequest {
+    pub username: String,
+    pub password: String,
+    pub password_confirmation: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegistrationProfileResponse {
+    pub username: String,
+    pub display_name: String,
+    pub real_name: String,
+    pub email: Option<String>,
+    pub itcode: String,
+    pub source: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LoginRequest {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CodeLoginRequest {
+    pub username: String,
+    pub code: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UsernameRequest {
+    pub username: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetPasswordRequest {
+    pub username: String,
+    pub code: String,
+    pub new_password: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TotpVerifyRequest {
+    pub code: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangePasswordRequest {
+    pub current_password: String,
+    pub new_password: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthStateResponse {
+    pub user: UserResponse,
+    pub next: String,
+    pub token: Option<String>,
+    pub trusted_device_token: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TotpSetupResponse {
+    pub secret: String,
+    pub uri: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RoleUpdateRequest {
+    pub roles: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchQuery {
+    pub q: String,
+    pub cluster_id: Option<String>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResult {
+    pub id: String,
+    pub title: String,
+    pub subtitle: String,
+    pub category: String,
+    pub cluster_id: Option<String>,
+    pub path: String,
+    pub status: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceMapNode {
+    pub id: String,
+    pub label: String,
+    pub kind: String,
+    pub namespace: Option<String>,
+    pub status: String,
+    pub group: String,
+    pub resource_kind: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceMapEdge {
+    pub id: String,
+    pub source: String,
+    pub target: String,
+    pub relation: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceMapResponse {
+    pub nodes: Vec<ResourceMapNode>,
+    pub edges: Vec<ResourceMapEdge>,
+    pub synced_at: Option<String>,
 }

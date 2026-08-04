@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: __APP_NAME__
+  namespace: custom-apps
+  labels:
+    app.kubernetes.io/name: kust
+    app.kubernetes.io/instance: __APP_NAME__
+    app.kubernetes.io/component: web
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: __APP_NAME__
+      app.kubernetes.io/component: web
+  strategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kust
+        app.kubernetes.io/instance: __APP_NAME__
+        app.kubernetes.io/component: web
+    spec:
+      imagePullSecrets:
+        - name: kust-harbor
+      containers:
+        - name: web
+          image: __FRONTEND_IMAGE__
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 80
+          env:
+            - name: API_UPSTREAM
+              value: __APP_NAME__-api:8080
+            - name: APP_BASE_PATH
+              value: __BASE_PATH__
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3

@@ -20,10 +20,10 @@ export function WorkloadsPage() {
   const { clusterId = '' } = useParams();
   const [searchParams] = useSearchParams();
   const namespace = searchParams.get('namespace') || 'all';
-  const { mode, getResources } = useData();
+  const { getResources } = useData();
   const [openRow, setOpenRow] = useState<ResourceRow>();
   const query = useQuery({
-    queryKey: ['workloads', clusterId, namespace, mode],
+    queryKey: ['workloads', clusterId, namespace],
     queryFn: async () => Promise.all(kinds.map((kind) => getResources(clusterId, kind, namespace))),
     enabled: Boolean(clusterId),
   });

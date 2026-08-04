@@ -7,13 +7,13 @@ import type { Cluster } from '../types';
 import { Button, EmptyState, Spinner, StatusPill } from '../components/ui';
 
 export function NotificationsPage() {
-  const { clusters, mode, getResources } = useData();
+  const { clusters, getResources } = useData();
   const { cluster: contextualCluster } = useOutletContext<{ cluster?: Cluster }>();
   const cluster = contextualCluster || clusters.find((item) => item.status === 'connected') || clusters[0];
   const [read, setRead] = useState<Set<string>>(new Set());
   const [unreadOnly, setUnreadOnly] = useState(false);
   const query = useQuery({
-    queryKey: ['notifications', cluster?.id, mode],
+    queryKey: ['notifications', cluster?.id],
     queryFn: () => getResources(cluster!.id, 'events'),
     enabled: Boolean(cluster),
   });
