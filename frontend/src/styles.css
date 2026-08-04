@@ -450,12 +450,12 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 0; accent-color: var
 .zoom-control button:hover { background: var(--surface-strong); }
 .zoom-control span { width: 44px; color: var(--text-muted); text-align: center; font-size: 10px; }
 
-.resource-drawer { position: fixed; z-index: 81; top: 10px; right: 10px; bottom: 10px; display: flex; flex-direction: column; width: min(680px, calc(100vw - 20px)); contain: layout paint; background-color: var(--surface-strong); background-image: linear-gradient(145deg, var(--glass-shine), transparent 36%, transparent 76%, var(--glass-shade)); border-radius: 16px; box-shadow: -24px 0 80px rgba(0, 0, 0, .42), inset 0 1px 0 var(--glass-edge); animation: drawer-in 300ms cubic-bezier(.16, 1, .3, 1) both; overflow: hidden; will-change: transform, opacity; }
+.resource-drawer { position: fixed; z-index: 81; top: 10px; right: 10px; bottom: 10px; display: flex; flex-direction: column; width: min(680px, calc(100vw - 20px)); contain: layout style; transform: translate3d(0, 0, 0); transform-origin: right center; backface-visibility: hidden; -webkit-backface-visibility: hidden; background-color: var(--surface-strong); background-image: linear-gradient(145deg, var(--glass-shine), transparent 36%, transparent 76%, var(--glass-shade)); border-radius: 16px; box-shadow: -24px 0 80px rgba(0, 0, 0, .42), inset 0 1px 0 var(--glass-edge); animation: drawer-in 300ms cubic-bezier(.16, 1, .3, 1) both; overflow: hidden; will-change: transform; }
 .resource-drawer.is-closing { pointer-events: none; animation: drawer-out 210ms cubic-bezier(.4, 0, .2, 1) both; }
 .drawer-scrim { position: fixed; z-index: 80; inset: 0; background: rgba(3, 5, 4, .48); border: 0; backdrop-filter: none; -webkit-backdrop-filter: none; animation: layer-fade-in 220ms cubic-bezier(.16, 1, .3, 1) both; will-change: opacity; }
 .drawer-scrim.is-closing { pointer-events: none; animation: layer-fade-out 190ms cubic-bezier(.4, 0, .2, 1) both; }
-@keyframes drawer-in { from { transform: translate3d(34px, 0, 0); opacity: 0; } }
-@keyframes drawer-out { to { transform: translate3d(40px, 0, 0); opacity: 0; } }
+@keyframes drawer-in { from { transform: translate3d(40px, 0, 0); } to { transform: translate3d(0, 0, 0); } }
+@keyframes drawer-out { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(44px, 0, 0); } }
 .drawer__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 78px; padding: 14px 18px; border-bottom: 1px solid var(--border); }
 .resource-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .resource-kind-icon { display: grid; place-items: center; width: 42px; height: 42px; flex: 0 0 42px; color: var(--accent); background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent); border-radius: 11px; box-shadow: inset 0 1px 0 var(--glass-edge), 0 0 18px color-mix(in srgb, var(--accent) 9%, transparent); }
@@ -983,22 +983,13 @@ kbd,
 :root[data-glass-motion="off"] .icon-button,
 :root[data-glass-motion="off"] .glass-card,
 :root[data-glass-motion="off"] .recent-cluster { transition: none !important; }
-:root[data-glass-motion="off"] .modal-backdrop,
-:root[data-glass-motion="off"] .modal,
-:root[data-glass-motion="off"] .resource-drawer,
-:root[data-glass-motion="off"] .drawer-scrim,
-:root[data-glass-motion="off"] .map-inspector,
-:root[data-glass-motion="off"] .select-menu__popover { animation: none !important; }
-:root[data-glass-motion="off"] .sidebar,
-:root[data-glass-motion="off"] .sidebar-scrim,
-:root[data-glass-motion="off"] .nav-sublist-shell,
-:root[data-glass-motion="off"] .nav-group__head svg { transition: none !important; }
 :root[data-glass-motion="off"] .button:hover,
 :root[data-glass-motion="off"] .icon-button:hover,
 :root[data-glass-motion="off"] .recent-cluster:hover { transform: none !important; }
 
 @media (hover: hover) {
   .glass-card { transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease; }
+  :root[data-glass-motion="on"] button.glass-card:hover { transform: translateY(-2px); }
   button.glass-card:hover { border-color: color-mix(in srgb, var(--border-strong) 65%, var(--glass-specular)); box-shadow: var(--glass-panel-shadow), inset 0 1px 0 var(--glass-specular), inset 1px 0 0 var(--glass-rim-red), inset -1px 0 0 var(--glass-rim-blue); }
 }
 

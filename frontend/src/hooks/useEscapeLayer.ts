@@ -64,9 +64,8 @@ export function useEscapeLayer(active: boolean, onEscape: () => void, priority =
 
 export function motionDuration(duration: number) {
   if (typeof window === 'undefined') return duration;
-  const motionDisabled = document.documentElement.dataset.glassMotion === 'off';
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  return motionDisabled || reducedMotion ? 0 : duration;
+  return reducedMotion ? 0 : duration;
 }
 
 export function useAnimatedPresence(open: boolean, duration = 220) {
