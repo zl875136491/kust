@@ -23,7 +23,8 @@ RUN mkdir src \
     && cargo build --release --locked \
     && rm -rf src
 COPY src ./src
-RUN cargo build --release --locked
+RUN cargo clean --release -p kust-api \
+    && cargo build --release --locked
 
 FROM builder AS test
 RUN cargo fmt --all -- --check \
