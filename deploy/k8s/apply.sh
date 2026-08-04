@@ -16,6 +16,7 @@ frontend_image="$3"
 
 : "${KUBE_API:?KUBE_API is required}"
 : "${KUBE_TOKEN:?KUBE_TOKEN is required}"
+: "${USER_INFO_URL:?USER_INFO_URL is required}"
 
 namespace="${KUBE_NAMESPACE:-custom-apps}"
 public_host="${PUBLIC_HOST:-k8s.1oa.com.cn}"
@@ -27,6 +28,11 @@ kube_connect_timeout="${KUBE_CONNECT_TIMEOUT_SECONDS:-5}"
 kube_request_timeout="${KUBE_REQUEST_TIMEOUT_SECONDS:-10}"
 kube_request_attempts="${KUBE_REQUEST_ATTEMPTS:-3}"
 deployment_wait_seconds="${KUBE_DEPLOYMENT_WAIT_SECONDS:-300}"
+
+if ! printf '%s' "$USER_INFO_URL" | grep -Eq '^https?://[^[:space:]]+$'; then
+  echo "USER_INFO_URL must be an HTTP(S) URL" >&2
+  exit 2
+fi
 
 if [ "$dry_run" != "true" ] && [ "$dry_run" != "false" ]; then
   echo "KUBE_DRY_RUN must be true or false" >&2
@@ -77,6 +83,7 @@ render() {
     -e "s|__BASE_PATH__|${base_path}|g" \
     -e "s|__MONGODB_DATABASE__|${mongodb_database}|g" \
     -e "s|__RUNTIME_SECRET__|${runtime_secret}|g" \
+    -e "s|__USER_INFO_URL__|${USER_INFO_URL}|g" \
     -e "s|__BACKEND_IMAGE__|${backend_image}|g" \
     -e "s|__FRONTEND_IMAGE__|${frontend_image}|g" \
     "$source" > "$destination"

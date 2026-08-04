@@ -41,6 +41,8 @@ spec:
               value: __MONGODB_DATABASE__
             - name: OA_CONFIG_PATH
               value: /etc/kust/runtime/oa_auth.txt
+            - name: OA_USER_INFO_URL
+              value: __USER_INFO_URL__
             - name: KUST_PRESET_CONFIG_PATH
               value: /etc/kust/runtime/tj_config
             - name: KUST_ENCRYPTION_KEY
