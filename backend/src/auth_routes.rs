@@ -11,18 +11,29 @@ use crate::{
     auth,
     error::AppError,
     models::{
-        AuthCodeDocument, AuthStateResponse, ChangePasswordRequest, CodeLoginRequest, LoginRequest,
-        RegisterRequest, RegistrationProfileResponse, ResetPasswordRequest, RoleDocument,
-        RoleUpdateRequest, TotpSetupResponse, TotpVerifyRequest, UpdateSettingsRequest,
-        UserDocument, UserResponse, UserSettingsDocument, UserSettingsResponse, UsernameRequest,
+        AuthCapabilitiesResponse, AuthCodeDocument, AuthStateResponse, ChangePasswordRequest,
+        CodeLoginRequest, LoginRequest, PlatformSettingsResponse, RegisterRequest,
+        RegistrationProfileResponse, ResetPasswordRequest, RoleDocument, RoleResponse,
+        RoleUpdateRequest, TotpSetupResponse, TotpVerifyRequest, UpdatePlatformSettingsRequest,
+        UpdateSettingsRequest, UserDocument, UserResponse, UserSettingsDocument,
+        UserSettingsResponse, UserStatusRequest, UsernameRequest,
     },
     state::SharedState,
 };
+
+pub async fn auth_capabilities(State(state): State<SharedState>) -> Json<AuthCapabilitiesResponse> {
+    let settings = state.platform_config.read().await;
+    Json(AuthCapabilitiesResponse {
+        registration_enabled: settings.registration_enabled,
+        oa_login_enabled: settings.oa_login_enabled && state.config.oa_user_info_url.is_some(),
+    })
+}
 
 pub async fn registration_lookup(
     State(state): State<SharedState>,
     Json(request): Json<UsernameRequest>,
 ) -> Result<Json<RegistrationProfileResponse>, AppError> {
+    ensure_registration_enabled(&state).await?;
     let username = normalized_username(&request.username)?;
     Ok(Json(registration_profile(&state, &username).await?))
 }
@@ -31,6 +42,7 @@ pub async fn register(
     State(state): State<SharedState>,
     Json(request): Json<RegisterRequest>,
 ) -> Result<impl IntoResponse, AppError> {
+    ensure_registration_enabled(&state).await?;
     let username = normalized_username(&request.username)?;
     if request.password != request.password_confirmation {
         return Err(AppError::bad_request("两次输入的密码不一致"));
@@ -42,6 +54,7 @@ pub async fn register(
         .await?;
     let password_hash = auth::hash_password(&request.password)?;
     let now = DateTime::now();
+    let default_role = state.platform_config.read().await.default_role.clone();
     let user = match existing {
         Some(mut user) => {
             if !user.password_unset || user.disabled {
@@ -81,7 +94,7 @@ pub async fn register(
                 source: "oa".into(),
                 password_hash,
                 password_unset: false,
-                roles: vec!["viewer".into()],
+                roles: vec![default_role],
                 disabled: false,
                 totp_secret_encrypted: None,
                 totp_enabled: false,
@@ -178,6 +191,12 @@ pub async fn oa_request(
     State(state): State<SharedState>,
     Json(request): Json<UsernameRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    {
+        let settings = state.platform_config.read().await;
+        if !settings.oa_login_enabled || state.config.oa_user_info_url.is_none() {
+            return Err(AppError::forbidden("OA login is disabled"));
+        }
+    }
     let itcode = normalized_username(&request.username)?;
     let user = get_or_import_oa_user(&state, &itcode).await?;
     let code = create_auth_code(&state, user.id, "login").await?;
@@ -313,7 +332,11 @@ pub async fn totp_verify(
             doc! { "_id": auth_context.session.id },
             doc! { "$set": {
                 "stage": "authenticated",
-                "expires_at": DateTime::from_millis(now.timestamp_millis() + 12 * 60 * 60 * 1_000)
+                "expires_at": DateTime::from_millis(
+                    now.timestamp_millis()
+                        + state.platform_config.read().await.session_timeout_hours.clamp(1, 72)
+                            * 60 * 60 * 1_000
+                )
             } },
         )
         .await?;
@@ -376,6 +399,7 @@ pub async fn update_settings(
     settings.hover_motion = request.hover_motion;
     settings.auto_refresh = request.auto_refresh;
     settings.page_size = request.page_size;
+    settings.window_close_confirmation = request.window_close_confirmation;
     settings.updated_at = DateTime::now();
     state
         .user_settings
@@ -435,19 +459,65 @@ pub async fn admin_users(
     Ok(Json(users.iter().map(UserDocument::response).collect()))
 }
 
+pub async fn admin_platform_settings(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+) -> Result<Json<PlatformSettingsResponse>, AppError> {
+    auth::require_admin(&state, &headers).await?;
+    let settings = state.platform_config.read().await;
+    Ok(Json(
+        settings.response(state.config.oa_user_info_url.is_some()),
+    ))
+}
+
+pub async fn update_platform_settings(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Json(request): Json<UpdatePlatformSettingsRequest>,
+) -> Result<Json<PlatformSettingsResponse>, AppError> {
+    let actor = auth::require_admin(&state, &headers).await?;
+    validate_platform_settings(&request, state.config.oa_user_info_url.is_some())?;
+    let role_exists = state
+        .roles
+        .find_one(doc! { "name": &request.default_role })
+        .await?
+        .is_some();
+    if !role_exists {
+        return Err(AppError::bad_request("default role does not exist"));
+    }
+
+    let mut settings = state.platform_config.read().await.clone();
+    settings.registration_enabled = request.registration_enabled;
+    settings.oa_login_enabled = request.oa_login_enabled;
+    settings.default_role = request.default_role;
+    settings.cache_ttl_seconds = request.cache_ttl_seconds;
+    settings.cache_sync_seconds = request.cache_sync_seconds;
+    settings.session_timeout_hours = request.session_timeout_hours;
+    settings.updated_at = DateTime::now();
+    settings.updated_by = Some(actor.user.id);
+    state
+        .platform_settings
+        .replace_one(doc! { "_id": &settings.id }, &settings)
+        .await?;
+    *state.platform_config.write().await = settings.clone();
+    Ok(Json(
+        settings.response(state.config.oa_user_info_url.is_some()),
+    ))
+}
+
 pub async fn admin_roles(
     State(state): State<SharedState>,
     headers: HeaderMap,
-) -> Result<Json<Vec<RoleDocument>>, AppError> {
+) -> Result<Json<Vec<RoleResponse>>, AppError> {
     auth::require_admin(&state, &headers).await?;
-    let roles = state
+    let roles: Vec<RoleDocument> = state
         .roles
         .find(doc! {})
         .sort(doc! { "created_at": 1 })
         .await?
         .try_collect()
         .await?;
-    Ok(Json(roles))
+    Ok(Json(roles.iter().map(RoleDocument::response).collect()))
 }
 
 pub async fn update_roles(
@@ -492,6 +562,46 @@ pub async fn update_roles(
         .users
         .replace_one(doc! { "_id": user.id }, &user)
         .await?;
+    Ok(Json(user.response()))
+}
+
+pub async fn update_user_status(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(user_id): Path<String>,
+    Json(request): Json<UserStatusRequest>,
+) -> Result<Json<UserResponse>, AppError> {
+    let actor = auth::require_admin(&state, &headers).await?;
+    let user_id =
+        ObjectId::parse_str(&user_id).map_err(|_| AppError::bad_request("user id is invalid"))?;
+    if actor.user.id == user_id && request.disabled {
+        return Err(AppError::forbidden("you cannot disable your own account"));
+    }
+    let mut user = state
+        .users
+        .find_one(doc! { "_id": user_id })
+        .await?
+        .ok_or_else(|| AppError::not_found("user was not found"))?;
+    user.disabled = request.disabled;
+    user.updated_at = DateTime::now();
+    state
+        .users
+        .replace_one(doc! { "_id": user.id }, &user)
+        .await?;
+    if user.disabled {
+        state
+            .sessions
+            .delete_many(doc! { "user_id": user.id })
+            .await?;
+        state
+            .trusted_devices
+            .delete_many(doc! { "user_id": user.id })
+            .await?;
+        state
+            .auth_codes
+            .delete_many(doc! { "user_id": user.id })
+            .await?;
+    }
     Ok(Json(user.response()))
 }
 
@@ -545,6 +655,43 @@ fn login_stage(user: &UserDocument, trusted: bool) -> &'static str {
     }
 }
 
+async fn ensure_registration_enabled(state: &SharedState) -> Result<(), AppError> {
+    if !state.platform_config.read().await.registration_enabled {
+        return Err(AppError::forbidden("user registration is disabled"));
+    }
+    Ok(())
+}
+
+fn validate_platform_settings(
+    request: &UpdatePlatformSettingsRequest,
+    oa_user_source_configured: bool,
+) -> Result<(), AppError> {
+    if !matches!(request.default_role.as_str(), "operator" | "viewer") {
+        return Err(AppError::bad_request(
+            "default role must be operator or viewer",
+        ));
+    }
+    if request.oa_login_enabled && !oa_user_source_configured {
+        return Err(AppError::bad_request("OA user source is not configured"));
+    }
+    if !(15..=600).contains(&request.cache_ttl_seconds) {
+        return Err(AppError::bad_request(
+            "cache TTL must be between 15 and 600 seconds",
+        ));
+    }
+    if !(15..=3_600).contains(&request.cache_sync_seconds) {
+        return Err(AppError::bad_request(
+            "cache sync period must be between 15 and 3600 seconds",
+        ));
+    }
+    if !(1..=72).contains(&request.session_timeout_hours) {
+        return Err(AppError::bad_request(
+            "session timeout must be between 1 and 72 hours",
+        ));
+    }
+    Ok(())
+}
+
 fn normalized_username(value: &str) -> Result<String, AppError> {
     let value = value.trim().to_lowercase();
     if value.len() < 3
@@ -585,6 +732,7 @@ fn settings_response(settings: &UserSettingsDocument, user: &UserDocument) -> Us
         hover_motion: settings.hover_motion,
         auto_refresh: settings.auto_refresh,
         page_size: settings.page_size,
+        window_close_confirmation: settings.window_close_confirmation,
         two_factor_enabled: user.totp_enabled,
         two_factor_required: user.is_admin(),
         two_factor_remember_days: user.two_factor_remember_days,
@@ -598,6 +746,8 @@ async fn get_or_import_oa_user(
     if let Some(user) = state.users.find_one(doc! { "itcode": itcode }).await? {
         return Ok(user);
     }
+    ensure_registration_enabled(state).await?;
+    let default_role = state.platform_config.read().await.default_role.clone();
     let profile = fetch_oa_profile(state, itcode).await?;
     let now = DateTime::now();
     let user = UserDocument {
@@ -610,7 +760,7 @@ async fn get_or_import_oa_user(
         source: "oa".into(),
         password_hash: String::new(),
         password_unset: true,
-        roles: vec!["viewer".into()],
+        roles: vec![default_role],
         disabled: false,
         totp_secret_encrypted: None,
         totp_enabled: false,
@@ -833,7 +983,9 @@ async fn send_oa_code(
 mod tests {
     use serde_json::json;
 
-    use super::parse_oa_profile;
+    use crate::models::UpdatePlatformSettingsRequest;
+
+    use super::{parse_oa_profile, validate_platform_settings};
 
     #[test]
     fn parses_registration_profile_from_oa_payload() {
@@ -859,5 +1011,25 @@ mod tests {
     #[test]
     fn rejects_oa_payload_without_identity_fields() {
         assert!(parse_oa_profile("missing", &json!({ "user_info": {} })).is_err());
+    }
+
+    #[test]
+    fn validates_platform_settings_bounds_and_default_role() {
+        let valid = UpdatePlatformSettingsRequest {
+            registration_enabled: true,
+            oa_login_enabled: true,
+            default_role: "viewer".into(),
+            cache_ttl_seconds: 45,
+            cache_sync_seconds: 60,
+            session_timeout_hours: 12,
+        };
+        assert!(validate_platform_settings(&valid, true).is_ok());
+
+        let invalid = UpdatePlatformSettingsRequest {
+            default_role: "admin".into(),
+            cache_sync_seconds: 5,
+            ..valid
+        };
+        assert!(validate_platform_settings(&invalid, true).is_err());
     }
 }

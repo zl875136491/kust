@@ -56,6 +56,12 @@ async fn main() {
         eprintln!("database connection failed: {error}");
         std::process::exit(2);
     });
+    let platform_config = db::load_platform_settings(&database, &config)
+        .await
+        .unwrap_or_else(|error| {
+            eprintln!("unable to initialize platform settings: {error}");
+            std::process::exit(2);
+        });
     let config = Arc::new(config);
     let state = Arc::new(AppState {
         clusters: database.collection("clusters"),
@@ -66,6 +72,8 @@ async fn main() {
         trusted_devices: database.collection("trusted_devices"),
         auth_codes: database.collection("auth_codes"),
         user_settings: database.collection("user_settings"),
+        platform_settings: database.collection("platform_settings"),
+        platform_config: Arc::new(tokio::sync::RwLock::new(platform_config)),
         database,
         secrets: SecretBox::new(&config.encryption_key),
         config: config.clone(),

@@ -1,12 +1,12 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { Braces, Copy, FileText, FolderOpen, Layers3, Logs, Scale, TerminalSquare, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { stringify } from 'yaml';
 import { useData } from '../data-context';
 import { motionDuration, useEscapeLayer } from '../hooks/useEscapeLayer';
 import type { ResourceDescriptor, ResourceRow } from '../types';
-import { Button, IconButton, Modal, Spinner, StatusPill, UnsavedChangesPrompt, useToast } from './ui';
+import { useWorkspaceWindows } from '../workspace-windows-context';
+import { Button, IconButton, Modal, StatusPill, UnsavedChangesPrompt, useToast } from './ui';
 
 function yamlFor(row: ResourceRow) {
   return stringify({
@@ -38,15 +38,13 @@ export function ResourceDrawer({
   row?: ResourceRow;
   onClose: () => void;
 }) {
-  const { deleteResource, getResourceYaml, scaleDeployment, getPodLogs, applyYaml } = useData();
-  const navigate = useNavigate();
+  const { clusters, deleteResource, getResourceYaml, scaleDeployment, applyYaml } = useData();
+  const { windows, openWindow, setWindowStatus } = useWorkspaceWindows();
   const queryClient = useQueryClient();
   const { pushToast } = useToast();
-  const [tab, setTab] = useState<'overview' | 'yaml' | 'logs'>('overview');
+  const [tab, setTab] = useState<'overview' | 'yaml'>('overview');
   const [yaml, setYaml] = useState('');
   const [savedYaml, setSavedYaml] = useState('');
-  const [logs, setLogs] = useState<string>();
-  const [logsLoading, setLogsLoading] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [scaleOpen, setScaleOpen] = useState(false);
   const [unsavedOpen, setUnsavedOpen] = useState(false);
@@ -101,7 +99,6 @@ export function ResourceDrawer({
       setYaml((current) => current === fallbackYaml ? resourceYaml : current);
       setSavedYaml(resourceYaml);
     }).catch(() => undefined);
-    setLogs(undefined);
     const currentReplicas = Number(sourceRow.ready?.split('/')[1] || 1);
     setReplicas(currentReplicas);
     setSavedReplicas(currentReplicas);
@@ -121,6 +118,11 @@ export function ResourceDrawer({
     try {
       await deleteResource(clusterId, descriptor.kind, row);
       await invalidate();
+      if (row.kind === 'Pod') {
+        windows
+          .filter((item) => item.clusterId === clusterId && item.namespace === row.namespace && item.resourceName === row.name)
+          .forEach((item) => setWindowStatus(item.id, 'missing', 'Pod 已被删除'));
+      }
       pushToast(`${row.kind}/${row.name} 已删除`);
       setDeleteOpen(false);
       beginClose();
@@ -150,13 +152,6 @@ export function ResourceDrawer({
       pushToast(error instanceof Error ? error.message : '扩缩容失败', 'error');
       return false;
     } finally { setBusy(false); }
-  };
-  const loadLogs = async () => {
-    if (!row.namespace || logsLoading || logs !== undefined) return;
-    setLogsLoading(true);
-    try { setLogs(await getPodLogs(clusterId, row.namespace, row.name)); }
-    catch (error) { pushToast(error instanceof Error ? error.message : '读取日志失败', 'error'); }
-    finally { setLogsLoading(false); }
   };
   const applyChanges = async () => {
     setBusy(true);
@@ -194,9 +189,9 @@ export function ResourceDrawer({
         </header>
         <div className="drawer__status"><StatusPill status={row.status} />{row.namespace && <span>{row.namespace}</span>}{row.ready && <span>{row.ready} 就绪</span>}</div>
         <div className="drawer__actions">
-          {row.kind === 'Pod' && <Button variant="secondary" aria-label="查看日志" icon={<Logs size={16} />} onClick={() => { setTab('logs'); void loadLogs(); }}>日志</Button>}
-          {row.kind === 'Pod' && row.namespace && <Button variant="secondary" aria-label="打开终端" icon={<TerminalSquare size={16} />} onClick={() => navigate(`/cluster/${clusterId}/pods/${encodeURIComponent(row.namespace!)}/${encodeURIComponent(row.name)}/shell${podContainer ? `?container=${encodeURIComponent(podContainer)}` : ''}`)}>终端</Button>}
-          {row.kind === 'Pod' && row.namespace && <Button variant="secondary" aria-label="打开文件" icon={<FolderOpen size={16} />} onClick={() => navigate(`/cluster/${clusterId}/pods/${encodeURIComponent(row.namespace!)}/${encodeURIComponent(row.name)}/files${podContainer ? `?container=${encodeURIComponent(podContainer)}` : ''}`)}>文件</Button>}
+          {row.kind === 'Pod' && row.namespace && <Button variant="secondary" aria-label="在窗口中查看日志" icon={<Logs size={16} />} onClick={() => openWindow({ type: 'logs', clusterId, clusterName: clusters.find((item) => item.id === clusterId)?.name, namespace: row.namespace!, resourceName: row.name, resourceUid: row.uid, container: podContainer })}>日志</Button>}
+          {row.kind === 'Pod' && row.namespace && <Button variant="secondary" aria-label="在窗口中打开终端" icon={<TerminalSquare size={16} />} onClick={() => openWindow({ type: 'shell', clusterId, clusterName: clusters.find((item) => item.id === clusterId)?.name, namespace: row.namespace!, resourceName: row.name, resourceUid: row.uid, container: podContainer })}>终端</Button>}
+          {row.kind === 'Pod' && row.namespace && <Button variant="secondary" aria-label="在窗口中打开文件" icon={<FolderOpen size={16} />} onClick={() => openWindow({ type: 'files', clusterId, clusterName: clusters.find((item) => item.id === clusterId)?.name, namespace: row.namespace!, resourceName: row.name, resourceUid: row.uid, container: podContainer })}>文件</Button>}
           {row.kind === 'Deployment' && <Button variant="secondary" aria-label="扩缩容" icon={<Scale size={16} />} onClick={() => { setReplicas(savedReplicas); setScaleOpen(true); }}>扩缩容</Button>}
           <Button variant="secondary" aria-label="复制 YAML" icon={<Copy size={16} />} onClick={() => { void navigator.clipboard.writeText(yaml); pushToast('YAML 已复制'); }}>复制</Button>
           <Button variant="danger" aria-label="删除资源" icon={<Trash2 size={16} />} onClick={() => setDeleteOpen(true)}>删除</Button>
@@ -204,7 +199,6 @@ export function ResourceDrawer({
         <div className="drawer-tabs" role="tablist">
           <button className={tab === 'overview' ? 'is-active' : ''} onClick={() => setTab('overview')}><FileText size={15} />概览</button>
           <button className={tab === 'yaml' ? 'is-active' : ''} onClick={() => setTab('yaml')}><Braces size={15} />YAML</button>
-          {row.kind === 'Pod' && <button className={tab === 'logs' ? 'is-active' : ''} onClick={() => { setTab('logs'); void loadLogs(); }}><Logs size={15} />日志</button>}
         </div>
         <div className="drawer__body">
           {tab === 'overview' && <>
@@ -213,7 +207,6 @@ export function ResourceDrawer({
             {details.length > 0 && <section className="detail-section"><h3>资源信息</h3><dl className="detail-grid detail-grid--resources">{details.map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{displayValue(value)}</dd></div>)}</dl></section>}
           </>}
           {tab === 'yaml' && <div className="yaml-editor yaml-editor--drawer"><div className="yaml-editor__bar"><Braces size={14} /><span>{row.name}.yaml</span></div><textarea value={yaml} onChange={(event) => setYaml(event.target.value)} spellCheck={false} /><div className="yaml-editor__footer"><Button variant="primary" onClick={applyChanges} disabled={busy}>应用更改</Button></div></div>}
-          {tab === 'logs' && <div className="logs-view">{logsLoading ? <Spinner label="正在读取日志" /> : <pre>{logs || '暂无日志'}</pre>}</div>}
         </div>
       </aside>
 

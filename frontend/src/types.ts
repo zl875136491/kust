@@ -102,6 +102,38 @@ export interface User {
   twoFactorRememberDays: number;
 }
 
+export interface Role {
+  id: string;
+  name: string;
+  label: string;
+  permissions: string[];
+  builtIn: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PlatformSettings {
+  registrationEnabled: boolean;
+  oaLoginEnabled: boolean;
+  defaultRole: string;
+  cacheTtlSeconds: number;
+  cacheSyncSeconds: number;
+  sessionTimeoutHours: number;
+  oaUserSourceConfigured: boolean;
+  presetClustersReadOnly: boolean;
+  updatedAt: string;
+}
+
+export type PlatformSettingsUpdate = Pick<
+  PlatformSettings,
+  | 'registrationEnabled'
+  | 'oaLoginEnabled'
+  | 'defaultRole'
+  | 'cacheTtlSeconds'
+  | 'cacheSyncSeconds'
+  | 'sessionTimeoutHours'
+>;
+
 export interface RegistrationProfile {
   username: string;
   displayName: string;
@@ -120,6 +152,11 @@ export interface AuthState {
   trustedDeviceToken?: string;
 }
 
+export interface AuthCapabilities {
+  registrationEnabled: boolean;
+  oaLoginEnabled: boolean;
+}
+
 export interface UserSettings {
   theme: ThemeMode;
   pointerHighlight: boolean;
@@ -128,6 +165,7 @@ export interface UserSettings {
   hoverMotion: boolean;
   autoRefresh: boolean;
   pageSize: number;
+  windowCloseConfirmation: boolean;
   twoFactorEnabled: boolean;
   twoFactorRequired: boolean;
   twoFactorRememberDays: number;

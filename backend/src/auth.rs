@@ -19,7 +19,6 @@ use crate::{
     state::SharedState,
 };
 
-const SESSION_HOURS: i64 = 12;
 const CHALLENGE_MINUTES: i64 = 10;
 
 #[derive(Clone, Debug)]
@@ -66,7 +65,13 @@ pub async fn create_session(
 ) -> Result<String, AppError> {
     let token = random_token(32);
     let minutes = if stage == "authenticated" {
-        SESSION_HOURS * 60
+        state
+            .platform_config
+            .read()
+            .await
+            .session_timeout_hours
+            .clamp(1, 72)
+            * 60
     } else {
         CHALLENGE_MINUTES
     };

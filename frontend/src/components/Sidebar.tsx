@@ -6,6 +6,7 @@ import {
   CirclePlus,
   Home,
   Settings,
+  Settings2,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
@@ -24,6 +25,7 @@ interface SidebarProps {
   onApply: () => void;
   canManageClusters: boolean;
   canWriteResources: boolean;
+  isAdmin: boolean;
 }
 
 export function Sidebar({
@@ -36,6 +38,7 @@ export function Sidebar({
   onApply,
   canManageClusters,
   canWriteResources,
+  isAdmin,
 }: SidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -179,6 +182,11 @@ export function Sidebar({
           <NavLink to="/settings" className="nav-item" onClick={closeOnMobile} title={!expandedView ? '设置' : undefined}>
             <Settings size={18} /><span>设置</span>
           </NavLink>
+          {isAdmin && (
+            <NavLink to="/system-settings" className="nav-item" onClick={closeOnMobile} title={!expandedView ? '系统设置' : undefined}>
+              <Settings2 size={18} /><span>系统设置</span>
+            </NavLink>
+          )}
           <button
             className="sidebar-toggle"
             onClick={onToggle}

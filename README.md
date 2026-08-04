@@ -18,6 +18,7 @@ Kust 是一个前后端分离的 Kubernetes 多集群管理控制台。产品结
 - OA 用户资料查询注册、密码登录、OA 登录、密码重置、内置管理员/运维/只读角色
 - TOTP 双重认证：管理员强制绑定，管理员免验证期 1-15 天，普通用户可关闭或设置 1-30 天
 - 用户设置同步：主题、玻璃效果、刷新、分页和安全设置绑定账号
+- 管理员系统设置：用户启停、角色分配、注册与 OA 登录策略、会话时长、缓存与同步周期
 - 集群概览：CPU、内存、Pod、Node 与 Events
 - Workloads：Pods、Deployments、StatefulSets、DaemonSets、ReplicaSets、Jobs、CronJobs
 - Storage：PVC、PV、StorageClass
@@ -41,7 +42,7 @@ flowchart LR
   UI -->|WebSocket / realtime REST| API
 ```
 
-MongoDB 是前端资源查询的主要数据源。后端按 `KUST_CACHE_SYNC_SECONDS` 周期同步资源；缓存缺失时同步等待，缓存过期时先返回已有数据并在后台刷新。资源写入 Kubernetes 成功后会刷新对应快照。Secret/ConfigMap 列表只缓存键名和元数据，不缓存内容。
+MongoDB 是前端资源查询的主要数据源。`KUST_CACHE_TTL_SECONDS` 与 `KUST_CACHE_SYNC_SECONDS` 作为首次启动默认值写入平台设置，之后可由管理员在系统设置中调整；缓存缺失时同步等待，缓存过期时先返回已有数据并在后台刷新。资源写入 Kubernetes 成功后会刷新对应快照。Secret/ConfigMap 列表只缓存键名和元数据，不缓存内容。
 
 敏感或交互式操作保持实时直连 Kubernetes：资源 YAML、Pod 日志、WebShell、WebFile，以及所有资源写操作。访问能力仍受保存 kubeconfig 的 Kubernetes RBAC 约束，并叠加 Kust 的 admin/operator/viewer 角色权限。
 
@@ -111,11 +112,15 @@ Vite 会把 `/api` 代理到 `http://127.0.0.1:8080`。
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | `GET` | `/api/health` | 服务与数据库状态 |
+| `GET` | `/api/auth/capabilities` | 当前注册与 OA 登录能力 |
 | `POST` | `/api/auth/register/lookup` | 按用户名查询注册所需的 OA 用户资料 |
 | `POST` | `/api/auth/register`, `/api/auth/login` | 注册并自动登录、密码登录 |
 | `POST` | `/api/auth/oa/request`, `/api/auth/code` | OA 登录链接与代码登录 |
 | `GET/POST` | `/api/auth/2fa/setup`, `/api/auth/2fa/verify` | TOTP 绑定与验证 |
 | `GET/PUT` | `/api/settings` | 用户设置读取与保存 |
+| `GET/PUT` | `/api/admin/settings` | 管理员读取与保存平台设置 |
+| `GET` | `/api/admin/users`, `/api/admin/roles` | 管理员查询用户与角色 |
+| `PATCH` | `/api/admin/users/:id/roles`, `/api/admin/users/:id/status` | 管理员分配角色或启停账号 |
 | `GET/POST` | `/api/clusters` | 查询或添加集群 |
 | `PATCH/DELETE` | `/api/clusters/:id` | 编辑或移除用户集群配置 |
 | `GET` | `/api/clusters/:id/overview` | 集群概览 |
@@ -151,7 +156,7 @@ KUST_TEST_KUBECONFIG=../../tj_config cargo test live_cluster_resource_smoke_test
 
 - 生产环境必须设置高强度 `KUST_ENCRYPTION_KEY`，更换密钥前需要迁移已保存的 kubeconfig。
 - 所有受保护 API 使用 `Authorization: Bearer` 会话；WebShell 通过 WebSocket 查询参数传递会话 token。生产环境必须使用 HTTPS/WSS，并避免在反向代理访问日志中记录查询字符串。
-- 新注册和首次导入的 OA 用户都默认获得 `viewer` 角色。系统不会自动创建或提升首个管理员；请由数据库运维显式将目标用户的 `roles` 设置为包含 `admin`。该用户下次登录时会被强制完成 TOTP 绑定。
+- 新注册和首次导入的 OA 用户默认获得系统设置中配置的角色，初始值为 `viewer`，且不能将 `admin` 设为注册默认角色。系统不会自动创建或提升首个管理员；请由数据库运维显式将目标用户的 `roles` 设置为包含 `admin`。该用户下次登录时会被强制完成 TOTP 绑定。
 - `KUST_EXPOSE_LOCAL_RESET_CODES` 仅用于本地开发，生产环境必须保持关闭。
 - 用户能看到和操作的资源取决于所保存 kubeconfig 的 RBAC 权限；不要录入权限高于使用者需要的凭据。
 - Secret 数据只在显式打开其 YAML 时由 Kubernetes API 返回，资源列表不会展示 Secret 内容。

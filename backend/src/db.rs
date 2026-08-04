@@ -4,7 +4,7 @@ use mongodb::{
     Client, Database, IndexModel,
 };
 
-use crate::{config::AppConfig, error::AppError};
+use crate::{config::AppConfig, error::AppError, models::PlatformSettingsDocument};
 
 pub async fn connect(config: &AppConfig) -> Result<Database, AppError> {
     let mut options = ClientOptions::parse(&config.mongodb_uri).await?;
@@ -17,6 +17,35 @@ pub async fn connect(config: &AppConfig) -> Result<Database, AppError> {
     create_indexes(&database).await?;
     seed_roles(&database).await?;
     Ok(database)
+}
+
+pub async fn load_platform_settings(
+    database: &Database,
+    config: &AppConfig,
+) -> Result<PlatformSettingsDocument, AppError> {
+    let settings = database.collection::<PlatformSettingsDocument>("platform_settings");
+    let cache_ttl_seconds = config.cache_ttl_seconds.clamp(15, 600) as i64;
+    let cache_sync_seconds = config.cache_sync_seconds.clamp(15, 3_600) as i64;
+    settings
+        .update_one(
+            doc! { "_id": "global" },
+            doc! { "$setOnInsert": {
+                "registration_enabled": true,
+                "oa_login_enabled": true,
+                "default_role": "viewer",
+                "cache_ttl_seconds": cache_ttl_seconds,
+                "cache_sync_seconds": cache_sync_seconds,
+                "session_timeout_hours": 12_i64,
+                "updated_at": mongodb::bson::DateTime::now(),
+                "updated_by": null,
+            } },
+        )
+        .upsert(true)
+        .await?;
+    settings
+        .find_one(doc! { "_id": "global" })
+        .await?
+        .ok_or_else(|| AppError::internal("platform settings were not initialized"))
 }
 
 async fn create_indexes(database: &Database) -> Result<(), AppError> {

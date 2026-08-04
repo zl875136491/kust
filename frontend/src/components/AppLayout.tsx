@@ -11,17 +11,25 @@ import { EmptyState, Modal } from './ui';
 import { api } from '../api';
 import type { SearchResult } from '../types';
 import { useAuth } from '../auth-context';
+import { WorkspaceWindowsProvider, useWorkspaceWindows } from '../workspace-windows-context';
+import { WorkspaceDesktop } from './WorkspaceDesktop';
 
 export function AppLayout() {
+  return <WorkspaceWindowsProvider><AppLayoutContent /></WorkspaceWindowsProvider>;
+}
+
+function AppLayoutContent() {
   const { user } = useAuth();
-  const canManageClusters = Boolean(user?.roles.includes('admin'));
+  const { windows } = useWorkspaceWindows();
+  const isAdmin = Boolean(user?.roles.includes('admin'));
+  const canManageClusters = isAdmin;
   const canWriteResources = Boolean(user?.roles.some((role) => role === 'admin' || role === 'operator'));
   const { clusters } = useData();
   const location = useLocation();
   const navigate = useNavigate();
   const routeClusterId = location.pathname.match(/^\/cluster\/([^/]+)/)?.[1];
   const [lastClusterId, setLastClusterId] = useState(() => localStorage.getItem('kust-selected-cluster') || undefined);
-  const keepsClusterContext = location.pathname === '/notifications' || location.pathname === '/settings';
+  const keepsClusterContext = location.pathname === '/notifications' || location.pathname === '/settings' || location.pathname === '/system-settings';
   const clusterId = routeClusterId || (keepsClusterContext ? lastClusterId : undefined);
   const cluster = clusters.find((item) => item.id === clusterId);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('kust-sidebar-collapsed') === 'true');
@@ -84,7 +92,7 @@ export function AppLayout() {
     : navigationItems;
 
   return (
-    <div className={`app-shell ${collapsed ? 'sidebar-collapsed' : ''}`}>
+    <div className={`app-shell ${collapsed ? 'sidebar-collapsed' : ''} ${windows.length ? 'has-workspace-windows' : ''}`}>
       <Sidebar
         cluster={cluster}
         collapsed={collapsed}
@@ -95,9 +103,11 @@ export function AppLayout() {
         onApply={() => setApplyOpen(true)}
         canManageClusters={canManageClusters}
         canWriteResources={canWriteResources}
+        isAdmin={isAdmin}
       />
       <TopBar cluster={cluster} onMenu={() => setMobileOpen(true)} onSearch={() => setSearchOpen(true)} />
       <main className="app-main"><Outlet context={{ cluster }} /></main>
+      <WorkspaceDesktop />
       <AddClusterModal open={canManageClusters && addClusterOpen} onClose={() => setAddClusterOpen(false)} />
       {cluster && canWriteResources && <YamlApplyModal cluster={cluster} open={applyOpen} onClose={() => setApplyOpen(false)} />}
       <Modal open={searchOpen} onClose={() => setSearchOpen(false)} title="全局搜索" width="620px">

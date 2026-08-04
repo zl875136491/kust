@@ -12,8 +12,8 @@ use crate::{
     crypto::SecretBox,
     error::AppError,
     models::{
-        AuthCodeDocument, ClusterDocument, ResourceSnapshotDocument, RoleDocument, SessionDocument,
-        TrustedDeviceDocument, UserDocument, UserSettingsDocument,
+        AuthCodeDocument, ClusterDocument, PlatformSettingsDocument, ResourceSnapshotDocument,
+        RoleDocument, SessionDocument, TrustedDeviceDocument, UserDocument, UserSettingsDocument,
     },
 };
 
@@ -38,6 +38,8 @@ pub struct AppState {
     pub trusted_devices: Collection<TrustedDeviceDocument>,
     pub auth_codes: Collection<AuthCodeDocument>,
     pub user_settings: Collection<UserSettingsDocument>,
+    pub platform_settings: Collection<PlatformSettingsDocument>,
+    pub platform_config: Arc<tokio::sync::RwLock<PlatformSettingsDocument>>,
     pub secrets: SecretBox,
     pub config: Arc<AppConfig>,
     pub http: reqwest::Client,
@@ -69,10 +71,25 @@ pub async fn sync_preset_clusters(
     let mut active_keys = Vec::with_capacity(presets.len());
     for preset in presets {
         active_keys.push(preset.preset_key.clone());
-        let existing = state
+        let existing_by_key = state
             .clusters
             .find_one(doc! { "preset_key": &preset.preset_key })
             .await?;
+        let existing = match existing_by_key {
+            Some(cluster) => Some(cluster),
+            None => {
+                state
+                    .clusters
+                    .find_one(doc! {
+                        "name": &preset.name,
+                        "$or": [
+                            { "source": "preset" },
+                            { "read_only": true }
+                        ]
+                    })
+                    .await?
+            }
+        };
         let now = DateTime::now();
         let document = ClusterDocument {
             id: existing

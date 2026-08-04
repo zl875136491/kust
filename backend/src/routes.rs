@@ -59,6 +59,10 @@ pub fn router(state: SharedState, config: &AppConfig) -> Result<Router, AppError
     Ok(Router::new()
         .route("/api/health", get(health))
         .route(
+            "/api/auth/capabilities",
+            get(auth_routes::auth_capabilities),
+        )
+        .route(
             "/api/auth/register/lookup",
             post(auth_routes::registration_lookup),
         )
@@ -89,8 +93,16 @@ pub fn router(state: SharedState, config: &AppConfig) -> Result<Router, AppError
         .route("/api/admin/users", get(auth_routes::admin_users))
         .route("/api/admin/roles", get(auth_routes::admin_roles))
         .route(
+            "/api/admin/settings",
+            get(auth_routes::admin_platform_settings).put(auth_routes::update_platform_settings),
+        )
+        .route(
             "/api/admin/users/{user_id}/roles",
             patch(auth_routes::update_roles),
+        )
+        .route(
+            "/api/admin/users/{user_id}/status",
+            patch(auth_routes::update_user_status),
         )
         .route(
             "/api/admin/users/{user_id}/reset-code",

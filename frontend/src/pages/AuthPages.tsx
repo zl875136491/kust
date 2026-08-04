@@ -5,7 +5,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { api } from '../api';
 import { useAuth } from '../auth-context';
 import { Button } from '../components/ui';
-import type { RegistrationProfile } from '../types';
+import type { AuthCapabilities, RegistrationProfile } from '../types';
 
 function AuthShell({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
   return <main className="auth-page"><section className="auth-panel glass-panel"><header className="auth-brand"><span className="auth-mark">K</span><div><strong>Kust</strong><small>Kubernetes 控制台</small></div></header><div className="auth-heading"><h1>{title}</h1><p>{subtitle}</p></div>{children}</section></main>;
@@ -19,7 +19,9 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [capabilities, setCapabilities] = useState<AuthCapabilities>();
   const code = params.get('code');
+  useEffect(() => { api.authCapabilities().then(setCapabilities).catch(() => setCapabilities({ registrationEnabled: false, oaLoginEnabled: false })); }, []);
   useEffect(() => {
     if (!code || !username) return;
     setBusy(true);
@@ -27,7 +29,7 @@ export function LoginPage() {
   }, [code, completeAuth, navigate, username]);
   const submit = async (event: FormEvent) => { event.preventDefault(); setBusy(true); setError(''); try { await login(username, password); navigate('/'); } catch (reason) { setError(reason instanceof Error ? reason.message : '登录失败'); } finally { setBusy(false); } };
   const oaLogin = async () => { setBusy(true); setError(''); try { const result = await api.oaLogin(username); setError(result.debugCode ? `开发登录码：${result.debugCode}` : result.message); } catch (reason) { setError(reason instanceof Error ? reason.message : 'OA 请求失败'); } finally { setBusy(false); } };
-  return <AuthShell title="欢迎回来" subtitle="登录后继续管理你的 Kubernetes 集群"><form className="auth-form" onSubmit={submit}><label><span>用户名 / ITCode</span><div className="auth-input"><UserRound size={17} /><input required autoFocus value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" /></div></label><label><span>密码</span><div className="auth-input"><LockKeyhole size={17} /><input required type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></div></label>{error && <p className="auth-message">{error}</p>}<Button variant="primary" disabled={busy}>{busy ? '登录中' : '登录'}</Button><Button type="button" onClick={oaLogin} disabled={busy || username.length < 3}>通过 OA 获取登录链接</Button></form><footer className="auth-links"><Link to="/forgot-password">忘记密码</Link><Link to="/register">创建账号</Link></footer></AuthShell>;
+  return <AuthShell title="欢迎回来" subtitle="登录后继续管理你的 Kubernetes 集群"><form className="auth-form" onSubmit={submit}><label><span>用户名 / ITCode</span><div className="auth-input"><UserRound size={17} /><input required autoFocus value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" /></div></label><label><span>密码</span><div className="auth-input"><LockKeyhole size={17} /><input required type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></div></label>{error && <p className="auth-message">{error}</p>}<Button variant="primary" disabled={busy}>{busy ? '登录中' : '登录'}</Button>{capabilities?.oaLoginEnabled && <Button type="button" onClick={oaLogin} disabled={busy || username.length < 3}>通过 OA 获取登录链接</Button>}</form><footer className="auth-links"><Link to="/forgot-password">忘记密码</Link>{capabilities?.registrationEnabled && <Link to="/register">创建账号</Link>}</footer></AuthShell>;
 }
 
 export function RegisterPage() {

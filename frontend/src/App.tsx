@@ -11,13 +11,14 @@ import { NotificationsPage } from './pages/NotificationsPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { ResourcePage } from './pages/ResourcePage';
 import { SettingsPage } from './pages/SettingsPage';
+import { SystemSettingsPage } from './pages/SystemSettingsPage';
 import { WorkloadsPage } from './pages/WorkloadsPage';
 import { WebFilePage } from './pages/WebFilePage';
 import { WebShellPage } from './pages/WebShellPage';
 import { ThemeProvider } from './theme-context';
 import { VisualEffectsProvider } from './visual-effects-context';
 import { AuthProvider } from './auth-context';
-import { AuthGate, GuestGate } from './components/AuthGate';
+import { AdminGate, AuthGate, GuestGate } from './components/AuthGate';
 import { ForgotPasswordPage, LoginPage, RegisterPage, ResetPasswordPage, TwoFactorPage } from './pages/AuthPages';
 import { PreferencesProvider } from './preferences-context';
 import { APP_BASE_PATH } from './runtime-config';
@@ -54,6 +55,9 @@ export default function App() {
                             <Route index element={<HomePage />} />
                             <Route path="notifications" element={<NotificationsPage />} />
                             <Route path="settings" element={<SettingsPage />} />
+                            <Route element={<AdminGate />}>
+                              <Route path="system-settings" element={<SystemSettingsPage />} />
+                            </Route>
                             <Route path="cluster/:clusterId" element={<OverviewPage />} />
                             <Route path="cluster/:clusterId/map" element={<MapPage />} />
                             <Route path="cluster/:clusterId/workloads" element={<WorkloadsPage />} />

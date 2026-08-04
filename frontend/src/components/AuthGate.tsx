@@ -19,3 +19,9 @@ export function GuestGate() {
   if (user && next !== 'authenticated') return <Navigate to={`/two-factor${next === 'enroll' ? '?mode=enroll' : ''}`} replace />;
   return <Outlet />;
 }
+
+export function AdminGate() {
+  const { user } = useAuth();
+  if (!user?.roles.includes('admin')) return <Navigate to="/" replace />;
+  return <Outlet />;
+}

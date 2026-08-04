@@ -312,6 +312,32 @@ impl UserDocument {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RoleResponse {
+    pub id: String,
+    pub name: String,
+    pub label: String,
+    pub permissions: Vec<String>,
+    pub built_in: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl RoleDocument {
+    pub fn response(&self) -> RoleResponse {
+        RoleResponse {
+            id: self.id.to_hex(),
+            name: self.name.clone(),
+            label: self.label.clone(),
+            permissions: self.permissions.clone(),
+            built_in: self.built_in,
+            created_at: self.created_at.try_to_rfc3339_string().unwrap_or_default(),
+            updated_at: self.updated_at.try_to_rfc3339_string().unwrap_or_default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UserResponse {
     pub id: String,
     pub username: String,
@@ -326,6 +352,93 @@ pub struct UserResponse {
     pub two_factor_enabled: bool,
     pub two_factor_required: bool,
     pub two_factor_remember_days: i32,
+}
+
+fn default_enabled() -> bool {
+    true
+}
+
+fn default_role() -> String {
+    "viewer".into()
+}
+
+fn default_cache_ttl_seconds() -> i64 {
+    45
+}
+
+fn default_cache_sync_seconds() -> i64 {
+    60
+}
+
+fn default_session_timeout_hours() -> i64 {
+    12
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PlatformSettingsDocument {
+    #[serde(rename = "_id")]
+    pub id: String,
+    #[serde(default = "default_enabled")]
+    pub registration_enabled: bool,
+    #[serde(default = "default_enabled")]
+    pub oa_login_enabled: bool,
+    #[serde(default = "default_role")]
+    pub default_role: String,
+    #[serde(default = "default_cache_ttl_seconds")]
+    pub cache_ttl_seconds: i64,
+    #[serde(default = "default_cache_sync_seconds")]
+    pub cache_sync_seconds: i64,
+    #[serde(default = "default_session_timeout_hours")]
+    pub session_timeout_hours: i64,
+    pub updated_at: DateTime,
+    #[serde(default)]
+    pub updated_by: Option<ObjectId>,
+}
+
+impl PlatformSettingsDocument {
+    pub fn response(&self, oa_user_source_configured: bool) -> PlatformSettingsResponse {
+        PlatformSettingsResponse {
+            registration_enabled: self.registration_enabled,
+            oa_login_enabled: self.oa_login_enabled && oa_user_source_configured,
+            default_role: self.default_role.clone(),
+            cache_ttl_seconds: self.cache_ttl_seconds,
+            cache_sync_seconds: self.cache_sync_seconds,
+            session_timeout_hours: self.session_timeout_hours,
+            oa_user_source_configured,
+            preset_clusters_read_only: true,
+            updated_at: self.updated_at.try_to_rfc3339_string().unwrap_or_default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlatformSettingsResponse {
+    pub registration_enabled: bool,
+    pub oa_login_enabled: bool,
+    pub default_role: String,
+    pub cache_ttl_seconds: i64,
+    pub cache_sync_seconds: i64,
+    pub session_timeout_hours: i64,
+    pub oa_user_source_configured: bool,
+    pub preset_clusters_read_only: bool,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdatePlatformSettingsRequest {
+    pub registration_enabled: bool,
+    pub oa_login_enabled: bool,
+    pub default_role: String,
+    pub cache_ttl_seconds: i64,
+    pub cache_sync_seconds: i64,
+    pub session_timeout_hours: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UserStatusRequest {
+    pub disabled: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -373,7 +486,13 @@ pub struct UserSettingsDocument {
     pub hover_motion: bool,
     pub auto_refresh: bool,
     pub page_size: i32,
+    #[serde(default = "default_window_close_confirmation")]
+    pub window_close_confirmation: bool,
     pub updated_at: DateTime,
+}
+
+fn default_window_close_confirmation() -> bool {
+    true
 }
 
 impl UserSettingsDocument {
@@ -388,6 +507,7 @@ impl UserSettingsDocument {
             hover_motion: true,
             auto_refresh: true,
             page_size: 25,
+            window_close_confirmation: true,
             updated_at: DateTime::now(),
         }
     }
@@ -403,6 +523,7 @@ pub struct UserSettingsResponse {
     pub hover_motion: bool,
     pub auto_refresh: bool,
     pub page_size: i32,
+    pub window_close_confirmation: bool,
     pub two_factor_enabled: bool,
     pub two_factor_required: bool,
     pub two_factor_remember_days: i32,
@@ -418,6 +539,7 @@ pub struct UpdateSettingsRequest {
     pub hover_motion: bool,
     pub auto_refresh: bool,
     pub page_size: i32,
+    pub window_close_confirmation: bool,
     pub two_factor_enabled: bool,
     pub two_factor_remember_days: i32,
 }
@@ -485,6 +607,13 @@ pub struct AuthStateResponse {
     pub next: String,
     pub token: Option<String>,
     pub trusted_device_token: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthCapabilitiesResponse {
+    pub registration_enabled: bool,
+    pub oa_login_enabled: bool,
 }
 
 #[derive(Debug, Serialize)]

@@ -140,7 +140,13 @@ async fn snapshot(
     let age_ms = DateTime::now()
         .timestamp_millis()
         .saturating_sub(stored.synced_at.timestamp_millis());
-    if age_ms > (state.config.cache_ttl_seconds as i64 * 1_000) {
+    let cache_ttl_seconds = state
+        .platform_config
+        .read()
+        .await
+        .cache_ttl_seconds
+        .clamp(15, 600);
+    if age_ms > cache_ttl_seconds * 1_000 {
         let state = state.clone();
         let cluster_id = cluster_id.to_string();
         let kind = normalized;
@@ -608,10 +614,13 @@ pub fn start_background_sync(state: SharedState) {
             if let Err(error) = sync_all(&state).await {
                 tracing::warn!(%error, "resource cache synchronization failed");
             }
-            tokio::time::sleep(std::time::Duration::from_secs(
-                state.config.cache_sync_seconds.max(15),
-            ))
-            .await;
+            let sync_seconds = state
+                .platform_config
+                .read()
+                .await
+                .cache_sync_seconds
+                .clamp(15, 3_600) as u64;
+            tokio::time::sleep(std::time::Duration::from_secs(sync_seconds)).await;
         }
     });
 }

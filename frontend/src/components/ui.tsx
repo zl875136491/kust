@@ -62,11 +62,12 @@ interface SelectMenuProps {
   onChange: (value: string) => void;
   label?: string;
   className?: string;
+  disabled?: boolean;
   'aria-label'?: string;
 }
 
 /** Cross-platform glass select; native menus vary substantially between browsers and OSes. */
-export function SelectMenu({ value, options, onChange, label, className = '', 'aria-label': ariaLabel }: SelectMenuProps) {
+export function SelectMenu({ value, options, onChange, label, className = '', disabled = false, 'aria-label': ariaLabel }: SelectMenuProps) {
   const [open, setOpen] = useState(false);
   const [highlighted, setHighlighted] = useState(() => Math.max(0, options.findIndex((option) => option.value === value)));
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -88,6 +89,10 @@ export function SelectMenu({ value, options, onChange, label, className = '', 'a
     document.addEventListener('mousedown', closeOnOutside);
     return () => document.removeEventListener('mousedown', closeOnOutside);
   }, [open]);
+
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
 
   useEscapeLayer(open, () => setOpen(false), 90);
 
@@ -164,6 +169,7 @@ export function SelectMenu({ value, options, onChange, label, className = '', 'a
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
+        disabled={disabled}
         onClick={() => setOpen((current) => !current)}
         onKeyDown={onTriggerKeyDown}
       >

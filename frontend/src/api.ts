@@ -6,7 +6,8 @@ import type {
   ResourceListResponse,
   ResourceRow,
   FileTreeResponse,
-  AuthState, RegistrationProfile, ResourceMapResponse, SearchResult, User, UserSettings,
+  AuthCapabilities, AuthState, PlatformSettings, PlatformSettingsUpdate, RegistrationProfile, ResourceMapResponse,
+  Role, SearchResult, User, UserSettings,
 } from './types';
 import { APP_BASE_PATH } from './runtime-config';
 
@@ -14,6 +15,16 @@ const API_ROOT = import.meta.env.VITE_API_URL || `${APP_BASE_PATH}/api`;
 const WS_ROOT = API_ROOT.startsWith('http')
   ? API_ROOT.replace(/^http/, 'ws')
   : (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host + API_ROOT;
+
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = localStorage.getItem('kust-session-token');
@@ -29,7 +40,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as { error?: string };
-    throw new Error(body.error || `请求失败 (${response.status})`);
+    throw new ApiError(body.error || `请求失败 (${response.status})`, response.status);
   }
   if (response.status === 204) {
     return undefined as T;
@@ -39,6 +50,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => request<{ status: string; database: string }>('/health'),
+  authCapabilities: () => request<AuthCapabilities>('/auth/capabilities'),
   registrationProfile: (username: string) => request<RegistrationProfile>('/auth/register/lookup', { method: 'POST', body: JSON.stringify({ username }) }),
   register: (username: string, password: string, passwordConfirmation: string) => request<AuthState>('/auth/register', { method: 'POST', body: JSON.stringify({ username, password, passwordConfirmation }) }),
   login: (username: string, password: string) => request<AuthState>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
@@ -53,7 +65,11 @@ export const api = {
   settings: () => request<UserSettings>('/settings'),
   updateSettings: (settings: UserSettings) => request<UserSettings>('/settings', { method: 'PUT', body: JSON.stringify(settings) }),
   users: () => request<User[]>('/admin/users'),
+  roles: () => request<Role[]>('/admin/roles'),
+  platformSettings: () => request<PlatformSettings>('/admin/settings'),
+  updatePlatformSettings: (settings: PlatformSettingsUpdate) => request<PlatformSettings>('/admin/settings', { method: 'PUT', body: JSON.stringify(settings) }),
   updateRoles: (id: string, roles: string[]) => request<User>(`/admin/users/${id}/roles`, { method: 'PATCH', body: JSON.stringify({ roles }) }),
+  updateUserStatus: (id: string, disabled: boolean) => request<User>(`/admin/users/${id}/status`, { method: 'PATCH', body: JSON.stringify({ disabled }) }),
   adminResetCode: (id: string) => request<{ username: string; code: string; expiresInMinutes: number }>(`/admin/users/${id}/reset-code`, { method: 'POST' }),
   changePassword: (currentPassword: string, newPassword: string) => request<void>('/auth/password/change', { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) }),
   search: (q: string, clusterId?: string) => { const params = new URLSearchParams({ q }); if (clusterId) params.set('clusterId', clusterId); return request<SearchResult[]>(`/search?${params}`); },
@@ -84,12 +100,17 @@ export const api = {
       `/clusters/${clusterId}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/scale`,
       { method: 'PATCH', body: JSON.stringify({ replicas }) },
     ),
-  podLogs: (clusterId: string, namespace: string, name: string, container?: string) => {
-    const query = container ? `?container=${encodeURIComponent(container)}` : '';
+  podLogs: (clusterId: string, namespace: string, name: string, container?: string, tailLines = 500) => {
+    const params = new URLSearchParams({ tailLines: String(tailLines) });
+    if (container) params.set('container', container);
     return request<{ logs: string }>(
-      `/clusters/${clusterId}/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/logs${query}`,
+      `/clusters/${clusterId}/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/logs?${params}`,
     );
   },
+  podExists: (clusterId: string, namespace: string, name: string) =>
+    request<{ yaml: string }>(
+      `/clusters/${clusterId}/resources/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
+    ).then(() => true),
   applyYaml: (clusterId: string, yaml: string, namespace?: string) =>
     request<{ kind: string; name: string; namespace?: string }>(`/clusters/${clusterId}/apply`, {
       method: 'POST',
