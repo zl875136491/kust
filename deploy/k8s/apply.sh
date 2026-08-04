@@ -23,11 +23,22 @@ public_gateway_ip="${PUBLIC_GATEWAY_IP:-10.17.158.71}"
 dry_run="${KUBE_DRY_RUN:-false}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 template_dir="${script_dir}/templates"
+kube_connect_timeout="${KUBE_CONNECT_TIMEOUT_SECONDS:-5}"
+kube_request_timeout="${KUBE_REQUEST_TIMEOUT_SECONDS:-10}"
+kube_request_attempts="${KUBE_REQUEST_ATTEMPTS:-3}"
+deployment_wait_seconds="${KUBE_DEPLOYMENT_WAIT_SECONDS:-300}"
 
 if [ "$dry_run" != "true" ] && [ "$dry_run" != "false" ]; then
   echo "KUBE_DRY_RUN must be true or false" >&2
   exit 2
 fi
+
+for value in "$kube_connect_timeout" "$kube_request_timeout" "$kube_request_attempts" "$deployment_wait_seconds"; do
+  if ! printf '%s' "$value" | grep -Eq '^[1-9][0-9]*$'; then
+    echo "Kubernetes timeout and retry settings must be positive integers" >&2
+    exit 2
+  fi
+done
 
 case "$environment" in
   production)
@@ -71,6 +82,26 @@ render() {
     "$source" > "$destination"
 }
 
+kube_request() {
+  local attempt
+
+  for attempt in $(seq 1 "$kube_request_attempts"); do
+    if curl --insecure --fail --silent --show-error \
+      --connect-timeout "$kube_connect_timeout" \
+      --max-time "$kube_request_timeout" \
+      "$@"; then
+      return 0
+    fi
+
+    if [ "$attempt" -lt "$kube_request_attempts" ]; then
+      echo "Kubernetes API request failed (${attempt}/${kube_request_attempts}); retrying..." >&2
+      sleep 2
+    fi
+  done
+
+  return 1
+}
+
 kube_apply() {
   local api_prefix="$1"
   local plural="$2"
@@ -81,7 +112,7 @@ kube_apply() {
     url="${url}&dryRun=All"
   fi
 
-  curl --insecure --fail --silent --show-error \
+  kube_request \
     --request PATCH \
     --header "Authorization: Bearer ${KUBE_TOKEN}" \
     --header 'Accept: application/json' \
@@ -94,18 +125,24 @@ kube_apply() {
 wait_for_deployment() {
   local name="$1"
   local url="${KUBE_API}/apis/apps/v1/namespaces/${namespace}/deployments/${name}"
-  local attempt payload compact generation observed available updated
+  local attempt=0 deadline payload compact generation observed available updated
 
-  for attempt in $(seq 1 60); do
-    payload="$(curl --insecure --fail --silent --show-error \
+  deadline=$(( $(date +%s) + deployment_wait_seconds ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    attempt=$((attempt + 1))
+    if ! payload="$(kube_request \
       --header "Authorization: Bearer ${KUBE_TOKEN}" \
       --header 'Accept: application/json' \
-      "$url")"
+      "$url")"; then
+      echo "Could not read Deployment ${name} (poll ${attempt}); continuing to wait." >&2
+      sleep 5
+      continue
+    fi
     compact="$(printf '%s' "$payload" | tr -d '\n')"
-    generation="$(printf '%s' "$compact" | sed -nE 's/.*"generation":([0-9]+).*/\1/p')"
-    observed="$(printf '%s' "$compact" | sed -nE 's/.*"observedGeneration":([0-9]+).*/\1/p')"
-    available="$(printf '%s' "$compact" | sed -nE 's/.*"availableReplicas":([0-9]+).*/\1/p')"
-    updated="$(printf '%s' "$compact" | sed -nE 's/.*"updatedReplicas":([0-9]+).*/\1/p')"
+    generation="$(printf '%s' "$compact" | sed -nE 's/.*"generation"[[:space:]]*:[[:space:]]*([0-9]+).*/\1/p')"
+    observed="$(printf '%s' "$compact" | sed -nE 's/.*"observedGeneration"[[:space:]]*:[[:space:]]*([0-9]+).*/\1/p')"
+    available="$(printf '%s' "$compact" | sed -nE 's/.*"availableReplicas"[[:space:]]*:[[:space:]]*([0-9]+).*/\1/p')"
+    updated="$(printf '%s' "$compact" | sed -nE 's/.*"updatedReplicas"[[:space:]]*:[[:space:]]*([0-9]+).*/\1/p')"
 
     if [ -n "$generation" ] \
       && [ "$observed" = "$generation" ] \
@@ -114,10 +151,14 @@ wait_for_deployment() {
       echo "Deployment ${name} is available."
       return 0
     fi
+
+    if [ "$attempt" -eq 1 ] || [ $((attempt % 6)) -eq 0 ]; then
+      echo "Waiting for Deployment ${name} (poll ${attempt}): generation=${generation:-unknown}, observed=${observed:-unknown}, updated=${updated:-0}, available=${available:-0}."
+    fi
     sleep 5
   done
 
-  echo "Deployment ${name} did not become available within 5 minutes" >&2
+  echo "Deployment ${name} did not become available within ${deployment_wait_seconds} seconds" >&2
   return 1
 }
 
