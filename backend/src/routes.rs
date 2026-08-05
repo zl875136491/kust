@@ -134,6 +134,7 @@ pub fn router(state: SharedState, config: &AppConfig) -> Result<Router, AppError
             "/api/clusters/{cluster_id}/metrics/summary",
             get(metrics_summary),
         )
+        .route("/api/clusters/{cluster_id}/discovery", get(discovery))
         .route("/api/clusters/{cluster_id}/map", get(resource_map))
         .route("/api/clusters/{cluster_id}/sync", post(sync_cluster))
         .route(
@@ -496,6 +497,17 @@ async fn metrics_summary(
     auth::authenticate(&state, &headers, "authenticated").await?;
     let client = state.kube_client(&cluster_id).await?;
     Ok(Json(kubernetes::metrics_summary(client).await?))
+}
+
+async fn discovery(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(cluster_id): Path<String>,
+) -> Result<impl IntoResponse, AppError> {
+    auth::authenticate(&state, &headers, "authenticated").await?;
+    Ok(Json(
+        kubernetes::discover_resources(state.kube_client(&cluster_id).await?).await?,
+    ))
 }
 
 async fn list_resources(

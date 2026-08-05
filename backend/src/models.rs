@@ -93,6 +93,17 @@ pub struct NotificationResponse {
     pub created_at: String,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveryResourceResponse {
+    pub group: String,
+    pub version: String,
+    pub kind: String,
+    pub resource: String,
+    pub namespaced: bool,
+    pub verbs: Vec<String>,
+}
+
 impl From<NotificationDocument> for NotificationResponse {
     fn from(value: NotificationDocument) -> Self {
         Self {

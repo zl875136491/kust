@@ -108,6 +108,15 @@ export interface MetricsSummary {
   message?: string;
 }
 
+export interface DiscoveryResource {
+  group: string;
+  version: string;
+  kind: string;
+  resource: string;
+  namespaced: boolean;
+  verbs: string[];
+}
+
 export interface ResourceDescriptor {
   kind: string;
   label: string;

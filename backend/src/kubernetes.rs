@@ -730,6 +730,27 @@ pub async fn list_resources(
     })
 }
 
+pub async fn discover_resources(
+    client: Client,
+) -> Result<Vec<crate::models::DiscoveryResourceResponse>, AppError> {
+    let entries = Discovery::new(client).run().await?;
+    let mut resources = Vec::new();
+    for group in entries.groups() {
+        for (resource, capabilities) in group.resources_by_stability() {
+            resources.push(crate::models::DiscoveryResourceResponse {
+                group: group.name().to_string(),
+                version: resource.version.clone(),
+                kind: resource.kind.clone(),
+                resource: resource.plural.clone(),
+                namespaced: capabilities.scope == Scope::Namespaced,
+                verbs: capabilities.operations.clone(),
+            });
+        }
+    }
+    resources.sort_by(|a, b| a.group.cmp(&b.group).then(a.kind.cmp(&b.kind)));
+    Ok(resources)
+}
+
 pub async fn metrics_summary(
     client: Client,
 ) -> Result<crate::models::MetricsSummaryResponse, AppError> {
