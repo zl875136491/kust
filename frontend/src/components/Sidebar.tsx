@@ -81,7 +81,7 @@ export function Sidebar({
       <aside className={`sidebar glass-panel ${collapsed ? 'is-collapsed' : ''} ${mobileOpen ? 'is-mobile-open' : ''}`}>
         <div className="sidebar__brand">
           <button className="brand-mark" aria-label="Kust 首页" onClick={() => navigate('/')}>
-            <span className="brand-mark__hex"><i /><i /><i /></span>
+            <img className="brand-mark__image" src={`${import.meta.env.BASE_URL}kust-mark.png`} alt="" aria-hidden="true" />
           </button>
           {expandedView && <button className="brand-word" onClick={() => navigate('/')}>Kust</button>}
         </div>

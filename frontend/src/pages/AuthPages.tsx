@@ -8,7 +8,7 @@ import { Button } from '../components/ui';
 import type { AuthCapabilities, RegistrationProfile } from '../types';
 
 function AuthShell({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
-  return <main className="auth-page"><section className="auth-panel glass-panel"><header className="auth-brand"><span className="auth-mark">K</span><div><strong>Kust</strong><small>Kubernetes 控制台</small></div></header><div className="auth-heading"><h1>{title}</h1><p>{subtitle}</p></div>{children}</section></main>;
+  return <main className="auth-page"><section className="auth-panel glass-panel"><header className="auth-brand"><img className="auth-mark" src={`${import.meta.env.BASE_URL}kust-mark.png`} alt="" aria-hidden="true" /><div><strong>Kust</strong><small>Kubernetes 控制台</small></div></header><div className="auth-heading"><h1>{title}</h1><p>{subtitle}</p></div>{children}</section></main>;
 }
 
 export function LoginPage() {
