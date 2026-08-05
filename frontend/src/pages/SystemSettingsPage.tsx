@@ -2,6 +2,7 @@ import {
   Activity,
   Check,
   Clock,
+  ChevronRight,
   Database,
   KeyRound,
   LoaderCircle,
@@ -71,6 +72,12 @@ export function SystemSettingsPage() {
   const [resetTarget, setResetTarget] = useState<User>();
   const [resetCode, setResetCode] = useState<ResetCode>();
   const [resetting, setResetting] = useState(false);
+
+  const views: { value: SystemView; label: string; description: string; icon: React.ReactNode }[] = [
+    { value: 'general', label: '平台', description: '访问、缓存与运行状态', icon: <Server size={18} /> },
+    { value: 'users', label: '用户', description: '账号状态与安全管理', icon: <Users size={18} /> },
+    { value: 'roles', label: '角色', description: '权限与成员概览', icon: <ShieldCheck size={18} /> },
+  ];
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -211,21 +218,32 @@ export function SystemSettingsPage() {
         </div>
       </header>
 
-      <div className="view-tabs system-settings-tabs" role="tablist" aria-label="系统设置分类">
-        <button className={view === 'general' ? 'is-active' : ''} onClick={() => setView('general')}><Server size={15} />平台</button>
-        <button className={view === 'users' ? 'is-active' : ''} onClick={() => setView('users')}><Users size={15} />用户</button>
-        <button className={view === 'roles' ? 'is-active' : ''} onClick={() => setView('roles')}><ShieldCheck size={15} />角色</button>
-      </div>
+      <div className="settings-workspace system-settings-workspace">
+        <nav className="settings-sidebar glass-card" aria-label="系统设置分类">
+          {views.map((item) => <button
+            key={item.value}
+            id={`system-settings-nav-${item.value}`}
+            className={view === item.value ? 'is-active' : ''}
+            aria-current={view === item.value ? 'page' : undefined}
+            aria-controls={`system-settings-panel-${item.value}`}
+            onClick={() => setView(item.value)}
+          >
+            {item.icon}
+            <span className="settings-sidebar__copy"><strong>{item.label}</strong><small>{item.description}</small></span>
+            <ChevronRight size={15} />
+          </button>)}
+        </nav>
 
-      <div className="system-summary" aria-label="系统概览">
-        <article className="system-stat glass-card"><span><Users size={18} /></span><div><strong>{activeUsers}</strong><small>活跃用户 / {users.length}</small></div></article>
-        <article className="system-stat glass-card"><span><ShieldCheck size={18} /></span><div><strong>{roles.length}</strong><small>系统角色</small></div></article>
-        <article className="system-stat glass-card"><span><Activity size={18} /></span><div><strong>{clusters.length}</strong><small>集群 / {presetClusters} 个预设</small></div></article>
-        <article className="system-stat glass-card"><span><Database size={18} /></span><div><strong>{databaseConnected ? '正常' : '异常'}</strong><small>MongoDB</small></div></article>
-      </div>
-
-      {view === 'general' && (
-        <div className="system-settings-grid">
+        <div className="settings-content">
+          {view === 'general' && (
+            <div id="system-settings-panel-general" aria-labelledby="system-settings-nav-general" className="settings-panel">
+              <div className="system-summary" aria-label="系统概览">
+                <article className="system-stat glass-card"><span><Users size={18} /></span><div><strong>{activeUsers}</strong><small>活跃用户 / {users.length}</small></div></article>
+                <article className="system-stat glass-card"><span><ShieldCheck size={18} /></span><div><strong>{roles.length}</strong><small>系统角色</small></div></article>
+                <article className="system-stat glass-card"><span><Activity size={18} /></span><div><strong>{clusters.length}</strong><small>集群 / {presetClusters} 个预设</small></div></article>
+                <article className="system-stat glass-card"><span><Database size={18} /></span><div><strong>{databaseConnected ? '正常' : '异常'}</strong><small>MongoDB</small></div></article>
+              </div>
+              <div className="system-settings-grid">
           <section className="settings-section glass-card">
             <header><UserCog size={19} /><h3>访问与身份</h3></header>
             <div className="setting-row"><div><strong>开放用户注册</strong><span>允许通过已配置用户源创建账号</span></div><label className="switch-control"><input aria-label="开放用户注册" type="checkbox" checked={draft.registrationEnabled} onChange={(event) => setDraft({ ...draft, registrationEnabled: event.target.checked })} /><i /></label></div>
@@ -245,11 +263,12 @@ export function SystemSettingsPage() {
               <div><Clock size={15} /><span>最近更新</span><strong>{new Date(draft.updatedAt).toLocaleString()}</strong></div>
             </div>
           </section>
-        </div>
-      )}
+              </div>
+            </div>
+          )}
 
-      {view === 'users' && (
-        <section className="admin-list glass-card">
+          {view === 'users' && (
+            <section id="system-settings-panel-users" aria-labelledby="system-settings-nav-users" className="admin-list settings-panel glass-card">
           <header className="admin-list__toolbar">
             <div><Users size={18} /><strong>用户管理</strong><span>{visibleUsers.length} / {users.length}</span></div>
             <label className="input-wrap admin-user-search"><Search size={15} /><input aria-label="搜索用户" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索姓名、账号或角色" /></label>
@@ -277,8 +296,8 @@ export function SystemSettingsPage() {
         </section>
       )}
 
-      {view === 'roles' && (
-        <div className="role-admin-grid">
+          {view === 'roles' && (
+            <div id="system-settings-panel-roles" aria-labelledby="system-settings-nav-roles" className="role-admin-grid settings-panel">
           {roles.map((role) => (
             <article className="role-admin-card glass-card" key={role.id}>
               <header><div><ShieldCheck size={18} /><span><strong>{role.label}</strong><small>{role.name}</small></span></div>{role.builtIn && <em>内置角色</em>}</header>
@@ -287,7 +306,9 @@ export function SystemSettingsPage() {
             </article>
           ))}
         </div>
-      )}
+          )}
+        </div>
+      </div>
 
       <Modal
         open={Boolean(statusTarget)}
