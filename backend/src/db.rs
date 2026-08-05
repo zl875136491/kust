@@ -94,8 +94,8 @@ async fn create_indexes(database: &Database) -> Result<(), AppError> {
 }
 
 async fn migrate_user_settings(database: &Database) -> Result<(), AppError> {
-    database
-        .collection::<mongodb::bson::Document>("user_settings")
+    let settings = database.collection::<mongodb::bson::Document>("user_settings");
+    settings
         .update_many(
             doc! { "visual_effects_version": { "$ne": USER_SETTINGS_VISUAL_EFFECTS_VERSION } },
             doc! { "$set": {
@@ -104,6 +104,15 @@ async fn migrate_user_settings(database: &Database) -> Result<(), AppError> {
                 "backdrop_blur": true,
                 "hover_motion": true,
                 "visual_effects_version": USER_SETTINGS_VISUAL_EFFECTS_VERSION,
+                "updated_at": mongodb::bson::DateTime::now(),
+            } },
+        )
+        .await?;
+    settings
+        .update_many(
+            doc! { "shell_theme": { "$exists": false } },
+            doc! { "$set": {
+                "shell_theme": "system",
                 "updated_at": mongodb::bson::DateTime::now(),
             } },
         )

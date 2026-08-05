@@ -370,6 +370,20 @@ pub async fn update_settings(
     if !matches!(request.theme.as_str(), "system" | "light" | "dark") {
         return Err(AppError::bad_request("theme is invalid"));
     }
+    if !matches!(
+        request.shell_theme.as_str(),
+        "system"
+            | "light"
+            | "dark"
+            | "one-dark"
+            | "dracula"
+            | "solarized-dark"
+            | "nord"
+            | "gruvbox-dark"
+            | "tokyo-night"
+    ) {
+        return Err(AppError::bad_request("shell theme is invalid"));
+    }
     if !(10..=200).contains(&request.page_size) {
         return Err(AppError::bad_request(
             "page size must be between 10 and 200",
@@ -393,6 +407,7 @@ pub async fn update_settings(
     }
     let mut settings = get_or_create_settings(&state, auth.user.id).await?;
     settings.theme = request.theme;
+    settings.shell_theme = request.shell_theme;
     settings.pointer_highlight = request.pointer_highlight;
     settings.refraction = request.refraction;
     settings.backdrop_blur = request.backdrop_blur;
@@ -726,6 +741,7 @@ async fn get_or_create_settings(
 fn settings_response(settings: &UserSettingsDocument, user: &UserDocument) -> UserSettingsResponse {
     UserSettingsResponse {
         theme: settings.theme.clone(),
+        shell_theme: settings.shell_theme.clone(),
         pointer_highlight: settings.pointer_highlight,
         refraction: settings.refraction,
         backdrop_blur: settings.backdrop_blur,

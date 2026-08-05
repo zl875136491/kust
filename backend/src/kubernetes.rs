@@ -25,7 +25,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use crate::{
     error::AppError,
     models::{
-        ApplyResourceResponse, OverviewResponse, ResourceListResponse, ResourceRow, StatusCount,
+        ApplyResourceResponse, OverviewResponse, ResourceListResponse, ResourceReference,
+        ResourceRow, StatusCount,
     },
 };
 
@@ -91,6 +92,25 @@ where
             .map(|time| time.0.to_rfc3339()),
         node: None,
         labels: metadata.labels.clone().unwrap_or_default(),
+        annotations: metadata.annotations.clone().unwrap_or_default(),
+        owner_references: metadata
+            .owner_references
+            .as_ref()
+            .map(|references| {
+                references
+                    .iter()
+                    .map(|reference| ResourceReference {
+                        api_version: reference.api_version.clone(),
+                        kind: reference.kind.clone(),
+                        name: reference.name.clone(),
+                        uid: reference.uid.clone(),
+                        controller: reference.controller.unwrap_or(false),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        generation: metadata.generation,
+        resource_version: metadata.resource_version.clone(),
         details: Value::Object(Default::default()),
     }
 }
@@ -119,9 +139,17 @@ fn pod_row(pod: &Pod) -> ResourceRow {
     row.node = pod.spec.as_ref().and_then(|spec| spec.node_name.clone());
     row.details = json!({
         "podIP": pod.status.as_ref().and_then(|status| status.pod_ip.clone()),
+        "podIPs": pod.status.as_ref().and_then(|status| status.pod_ips.clone()).unwrap_or_default(),
+        "hostIP": pod.status.as_ref().and_then(|status| status.host_ip.clone()),
+        "startTime": pod.status.as_ref().and_then(|status| status.start_time.as_ref()).map(|time| time.0.to_rfc3339()),
         "qosClass": pod.status.as_ref().and_then(|status| status.qos_class.clone()),
+        "serviceAccount": pod.spec.as_ref().and_then(|spec| spec.service_account_name.clone()),
+        "priorityClass": pod.spec.as_ref().and_then(|spec| spec.priority_class_name.clone()),
         "images": pod.spec.as_ref().map(|spec| spec.containers.iter().map(|container| container.image.clone().unwrap_or_default()).collect::<Vec<_>>()).unwrap_or_default(),
         "containers": pod.spec.as_ref().map(|spec| spec.containers.iter().map(|container| container.name.clone()).collect::<Vec<_>>()).unwrap_or_default(),
+        "persistentVolumeClaims": pod.spec.as_ref().and_then(|spec| spec.volumes.as_ref()).map(|volumes| volumes.iter().filter_map(|volume| volume.persistent_volume_claim.as_ref().map(|claim| claim.claim_name.clone())).collect::<Vec<_>>()).unwrap_or_default(),
+        "configMaps": pod.spec.as_ref().and_then(|spec| spec.volumes.as_ref()).map(|volumes| volumes.iter().filter_map(|volume| volume.config_map.as_ref().map(|config_map| config_map.name.clone())).collect::<Vec<_>>()).unwrap_or_default(),
+        "secrets": pod.spec.as_ref().and_then(|spec| spec.volumes.as_ref()).map(|volumes| volumes.iter().filter_map(|volume| volume.secret.as_ref().and_then(|secret| secret.secret_name.clone())).collect::<Vec<_>>()).unwrap_or_default(),
     });
     row
 }
@@ -153,8 +181,14 @@ fn deployment_row(item: &Deployment) -> ResourceRow {
     row.details = json!({
         "available": available,
         "desired": desired,
-        "strategy": item.spec.as_ref().and_then(|spec| spec.strategy.as_ref()).and_then(|strategy| strategy.type_.clone()),
+        "ready": ready,
+        "updated": item.status.as_ref().and_then(|status| status.updated_replicas).unwrap_or(0),
+        "unavailable": item.status.as_ref().and_then(|status| status.unavailable_replicas).unwrap_or(0),
+        "strategy": item.spec.as_ref().and_then(|spec| spec.strategy.clone()),
         "selector": item.spec.as_ref().map(|spec| spec.selector.match_labels.clone().unwrap_or_default()).unwrap_or_default(),
+        "progressDeadlineSeconds": item.spec.as_ref().and_then(|spec| spec.progress_deadline_seconds),
+        "revisionHistoryLimit": item.spec.as_ref().and_then(|spec| spec.revision_history_limit),
+        "images": item.spec.as_ref().and_then(|spec| spec.template.spec.as_ref()).map(|spec| spec.containers.iter().map(|container| container.image.clone().unwrap_or_default()).collect::<Vec<_>>()).unwrap_or_default(),
     });
     row
 }
@@ -183,6 +217,7 @@ fn stateful_set_row(item: &StatefulSet) -> ResourceRow {
         "currentRevision": item.status.as_ref().and_then(|status| status.current_revision.clone()),
         "updateRevision": item.status.as_ref().and_then(|status| status.update_revision.clone()),
         "selector": item.spec.as_ref().map(|spec| spec.selector.match_labels.clone().unwrap_or_default()).unwrap_or_default(),
+        "images": item.spec.as_ref().and_then(|spec| spec.template.spec.as_ref()).map(|spec| spec.containers.iter().map(|container| container.image.clone().unwrap_or_default()).collect::<Vec<_>>()).unwrap_or_default(),
     });
     row
 }
@@ -210,6 +245,7 @@ fn daemon_set_row(item: &DaemonSet) -> ResourceRow {
         "available": item.status.as_ref().and_then(|status| status.number_available),
         "updated": item.status.as_ref().and_then(|status| status.updated_number_scheduled),
         "selector": item.spec.as_ref().map(|spec| spec.selector.match_labels.clone().unwrap_or_default()).unwrap_or_default(),
+        "images": item.spec.as_ref().and_then(|spec| spec.template.spec.as_ref()).map(|spec| spec.containers.iter().map(|container| container.image.clone().unwrap_or_default()).collect::<Vec<_>>()).unwrap_or_default(),
     });
     row
 }
@@ -235,7 +271,10 @@ fn replica_set_row(item: &ReplicaSet) -> ResourceRow {
     row.ready = Some(format!("{ready}/{desired}"));
     row.details = json!({
         "desired": desired,
+        "ready": ready,
+        "available": item.status.as_ref().and_then(|status| status.available_replicas).unwrap_or(0),
         "selector": item.spec.as_ref().map(|spec| spec.selector.match_labels.clone().unwrap_or_default()).unwrap_or_default(),
+        "images": item.spec.as_ref().and_then(|spec| spec.template.as_ref()).and_then(|template| template.spec.as_ref()).map(|spec| spec.containers.iter().map(|container| container.image.clone().unwrap_or_default()).collect::<Vec<_>>()).unwrap_or_default(),
     });
     row
 }
@@ -410,6 +449,9 @@ fn pv_row(item: &PersistentVolume) -> ResourceRow {
         "storageClass": item.spec.as_ref().and_then(|spec| spec.storage_class_name.clone()),
         "capacity": item.spec.as_ref().and_then(|spec| spec.capacity.clone()),
         "claim": item.spec.as_ref().and_then(|spec| spec.claim_ref.as_ref()).and_then(|claim| claim.name.clone()),
+        "claimNamespace": item.spec.as_ref().and_then(|spec| spec.claim_ref.as_ref()).and_then(|claim| claim.namespace.clone()),
+        "reclaimPolicy": item.spec.as_ref().and_then(|spec| spec.persistent_volume_reclaim_policy.clone()),
+        "accessModes": item.spec.as_ref().and_then(|spec| spec.access_modes.clone()).unwrap_or_default(),
     });
     row
 }
@@ -514,6 +556,25 @@ fn dynamic_row(item: &DynamicObject, kind: &str) -> ResourceRow {
             .map(|time| time.0.to_rfc3339()),
         node: None,
         labels: metadata.labels.clone().unwrap_or_default(),
+        annotations: metadata.annotations.clone().unwrap_or_default(),
+        owner_references: metadata
+            .owner_references
+            .as_ref()
+            .map(|references| {
+                references
+                    .iter()
+                    .map(|reference| ResourceReference {
+                        api_version: reference.api_version.clone(),
+                        kind: reference.kind.clone(),
+                        name: reference.name.clone(),
+                        uid: reference.uid.clone(),
+                        controller: reference.controller.unwrap_or(false),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        generation: metadata.generation,
+        resource_version: metadata.resource_version.clone(),
         details: json!({
             "hostnames": hostnames,
             "parentRefs": parents,
@@ -782,7 +843,12 @@ pub async fn delete_resource(
         "replicasets" => delete_namespaced::<ReplicaSet>(client, required_namespace()?, name).await,
         "jobs" => delete_namespaced::<Job>(client, required_namespace()?, name).await,
         "cronjobs" => delete_namespaced::<CronJob>(client, required_namespace()?, name).await,
+        "events" => delete_namespaced::<Event>(client, required_namespace()?, name).await,
         "services" => delete_namespaced::<Service>(client, required_namespace()?, name).await,
+        "endpoints" => delete_namespaced::<Endpoints>(client, required_namespace()?, name).await,
+        "endpointslices" => {
+            delete_namespaced::<EndpointSlice>(client, required_namespace()?, name).await
+        }
         "ingresses" => delete_namespaced::<Ingress>(client, required_namespace()?, name).await,
         "configmaps" => delete_namespaced::<ConfigMap>(client, required_namespace()?, name).await,
         "secrets" => delete_namespaced::<Secret>(client, required_namespace()?, name).await,
@@ -862,20 +928,80 @@ pub async fn scale_deployment(
     name: &str,
     replicas: i32,
 ) -> Result<ResourceRow, AppError> {
+    scale_workload(client, "deployments", namespace, name, replicas).await
+}
+
+pub async fn scale_workload(
+    client: Client,
+    kind: &str,
+    namespace: &str,
+    name: &str,
+    replicas: i32,
+) -> Result<ResourceRow, AppError> {
     if !(0..=10_000).contains(&replicas) {
         return Err(AppError::bad_request(
             "replicas must be between 0 and 10000",
         ));
     }
-    let api: Api<Deployment> = Api::namespaced(client, namespace);
-    let deployment = api
-        .patch(
-            name,
-            &PatchParams::default(),
-            &Patch::Merge(json!({ "spec": { "replicas": replicas } })),
-        )
-        .await?;
-    Ok(deployment_row(&deployment))
+    let patch = Patch::Merge(json!({ "spec": { "replicas": replicas } }));
+    match kind.to_ascii_lowercase().replace(['-', '_'], "").as_str() {
+        "deployments" | "deployment" => {
+            let api: Api<Deployment> = Api::namespaced(client, namespace);
+            Ok(deployment_row(
+                &api.patch(name, &PatchParams::default(), &patch).await?,
+            ))
+        }
+        "statefulsets" | "statefulset" => {
+            let api: Api<StatefulSet> = Api::namespaced(client, namespace);
+            Ok(stateful_set_row(
+                &api.patch(name, &PatchParams::default(), &patch).await?,
+            ))
+        }
+        "replicasets" | "replicaset" => {
+            let api: Api<ReplicaSet> = Api::namespaced(client, namespace);
+            Ok(replica_set_row(
+                &api.patch(name, &PatchParams::default(), &patch).await?,
+            ))
+        }
+        _ => Err(AppError::bad_request(format!(
+            "resource kind '{kind}' cannot be scaled"
+        ))),
+    }
+}
+
+pub async fn restart_workload(
+    client: Client,
+    kind: &str,
+    namespace: &str,
+    name: &str,
+) -> Result<ResourceRow, AppError> {
+    let restarted_at = chrono::Utc::now().to_rfc3339();
+    let patch = Patch::Merge(json!({
+        "spec": { "template": { "metadata": { "annotations": { "kust.dev/restartedAt": restarted_at } } } }
+    }));
+    match kind.to_ascii_lowercase().replace(['-', '_'], "").as_str() {
+        "deployments" | "deployment" => {
+            let api: Api<Deployment> = Api::namespaced(client, namespace);
+            Ok(deployment_row(
+                &api.patch(name, &PatchParams::default(), &patch).await?,
+            ))
+        }
+        "statefulsets" | "statefulset" => {
+            let api: Api<StatefulSet> = Api::namespaced(client, namespace);
+            Ok(stateful_set_row(
+                &api.patch(name, &PatchParams::default(), &patch).await?,
+            ))
+        }
+        "daemonsets" | "daemonset" => {
+            let api: Api<DaemonSet> = Api::namespaced(client, namespace);
+            Ok(daemon_set_row(
+                &api.patch(name, &PatchParams::default(), &patch).await?,
+            ))
+        }
+        _ => Err(AppError::bad_request(format!(
+            "resource kind '{kind}' cannot be restarted"
+        ))),
+    }
 }
 
 pub async fn pod_logs(

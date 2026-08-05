@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  FileCode2,
   FileWarning,
   FolderOpen,
   LoaderCircle,
@@ -17,10 +18,11 @@ import { Rnd } from 'react-rnd';
 import { type WorkspaceWindow, type WorkspaceWindowStatus, type WorkspaceWindowType, useWorkspaceWindows } from '../workspace-windows-context';
 import { FileWindowContent } from './workspace/FileWindowContent';
 import { LogsWindowContent } from './workspace/LogsWindowContent';
+import { ResourceEditorWindowContent } from './workspace/ResourceEditorWindowContent';
 import { ShellWindowContent } from './workspace/ShellWindowContent';
 import { Button, IconButton } from './ui';
 
-const typeLabels: Record<WorkspaceWindowType, string> = { shell: '终端', files: '文件', logs: '日志' };
+const typeLabels: Record<WorkspaceWindowType, string> = { shell: '终端', files: '文件', logs: '日志', editor: 'YAML' };
 const statusLabels: Record<WorkspaceWindowStatus, string> = {
   connecting: '连接中',
   connected: '已连接',
@@ -33,17 +35,24 @@ const statusLabels: Record<WorkspaceWindowStatus, string> = {
 function TypeIcon({ type, size = 16 }: { type: WorkspaceWindowType; size?: number }) {
   if (type === 'shell') return <TerminalSquare size={size} />;
   if (type === 'files') return <FolderOpen size={size} />;
+  if (type === 'editor') return <FileCode2 size={size} />;
   return <Logs size={size} />;
 }
 
 function WindowContent({ item }: { item: WorkspaceWindow }) {
   if (item.type === 'shell') return <ShellWindowContent item={item} />;
   if (item.type === 'files') return <FileWindowContent item={item} />;
+  if (item.type === 'editor') return <ResourceEditorWindowContent item={item} />;
   return <LogsWindowContent item={item} />;
+}
+
+function statusLabel(item: WorkspaceWindow) {
+  return item.type === 'editor' && item.status === 'connected' ? '已打开' : statusLabels[item.status];
 }
 
 function ConnectionState({ item }: { item: WorkspaceWindow }) {
   const { reconnectWindow, removeWindow } = useWorkspaceWindows();
+  if (item.type === 'editor') return null;
   if (!['disconnected', 'error', 'missing'].includes(item.status)) return null;
   const missing = item.status === 'missing';
   return (
@@ -63,7 +72,7 @@ function TaskAction({ item }: { item: WorkspaceWindow }) {
   if (item.status === 'missing') {
     return <button className="workspace-task__failure" aria-label={`移除已删除的 ${item.resourceName}`} title="资源已删除，点击移除" onClick={() => removeWindow(item.id)}>F</button>;
   }
-  if (item.status === 'disconnected' || item.status === 'error') {
+  if (item.type !== 'editor' && (item.status === 'disconnected' || item.status === 'error')) {
     return <IconButton className="workspace-task__action" label={`重新连接${typeLabels[item.type]} ${item.resourceName}`} onClick={() => reconnectWindow(item.id)}><RotateCw size={15} /></IconButton>;
   }
   if (item.status === 'connecting' || item.status === 'reconnecting') {
@@ -139,11 +148,11 @@ export function WorkspaceDesktop() {
               <span className={`workspace-window__type workspace-window__type--${item.type}`}><TypeIcon type={item.type} /></span>
               <div className="workspace-window__identity">
                 <strong>{item.resourceName}</strong>
-                <span>{typeLabels[item.type]} · {item.namespace}{item.container ? ` / ${item.container}` : ''}</span>
+                <span>{typeLabels[item.type]} · {item.type === 'editor' ? `${item.editorMode === 'create' ? '新建' : '编辑'} · ${item.namespace}` : `${item.namespace}${item.container ? ` / ${item.container}` : ''}`}</span>
               </div>
-              <span className={`workspace-window__status is-${item.status}`} title={item.statusMessage || statusLabels[item.status]}>
+              <span className={`workspace-window__status is-${item.status}`} title={item.statusMessage || statusLabel(item)}>
                 {(item.status === 'connecting' || item.status === 'reconnecting') && <LoaderCircle className="spin" size={13} />}
-                <i />{statusLabels[item.status]}{item.dirty && <em>未保存</em>}
+                <i />{statusLabel(item)}{item.dirty && <em>未保存</em>}
               </span>
               <div className="workspace-window__controls">
                 <IconButton label="最小化" onClick={() => minimizeWindow(item.id)}><Minus size={16} /></IconButton>
@@ -151,7 +160,7 @@ export function WorkspaceDesktop() {
                 <IconButton label="关闭窗口" onClick={() => requestClose(item.id)}><X size={16} /></IconButton>
               </div>
             </header>
-            <div className="workspace-window__body"><WindowContent item={item} /><ConnectionState item={item} /></div>
+            <div className={`workspace-window__body workspace-window__body--${item.type}`}><WindowContent item={item} /><ConnectionState item={item} /></div>
           </section>
         </Rnd>
       ))}
@@ -159,7 +168,7 @@ export function WorkspaceDesktop() {
     {orderedTasks.length > 0 && <footer className="workspace-taskbar glass-panel" aria-label="窗口任务栏">
       <div className="workspace-taskbar__list">
         {orderedTasks.map((item) => <div key={item.id} className={`workspace-task ${item.minimized ? 'is-minimized' : ''} is-${item.status}`}>
-          <button className="workspace-task__main" aria-label={`${typeLabels[item.type]} ${item.resourceName}`} title={`${item.resourceName} · ${typeLabels[item.type]} · ${statusLabels[item.status]}`} onClick={() => item.minimized ? restoreWindow(item.id) : focusWindow(item.id)}>
+          <button className="workspace-task__main" aria-label={`${typeLabels[item.type]} ${item.resourceName}`} title={`${item.resourceName} · ${typeLabels[item.type]} · ${statusLabel(item)}`} onClick={() => item.minimized ? restoreWindow(item.id) : focusWindow(item.id)}>
             <span className={`workspace-task__type workspace-window__type--${item.type}`}><TypeIcon type={item.type} size={15} /></span>
             <span className="workspace-task__name">{item.resourceName}</span>
             {item.dirty && <i className="workspace-task__dirty" title="有未保存的更改" />}

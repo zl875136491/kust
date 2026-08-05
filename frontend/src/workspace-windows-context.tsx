@@ -5,7 +5,7 @@ import { useAuth } from './auth-context';
 import { createClientId } from './browser-compat';
 import { usePreferences } from './preferences-context';
 
-export type WorkspaceWindowType = 'shell' | 'files' | 'logs';
+export type WorkspaceWindowType = 'shell' | 'files' | 'logs' | 'editor';
 export type WorkspaceWindowStatus = 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'error' | 'missing';
 
 export interface WindowBounds {
@@ -23,6 +23,10 @@ export interface OpenWorkspaceWindow {
   resourceName: string;
   resourceUid?: string;
   container?: string;
+  editorMode?: 'create' | 'edit';
+  editorKind?: string;
+  editorContent?: string;
+  editorSavedContent?: string;
 }
 
 export interface WorkspaceWindow extends OpenWorkspaceWindow {
@@ -60,6 +64,7 @@ interface WorkspaceWindowsContextValue {
   toggleMaximized: (id: string, workspaceWidth: number, workspaceHeight: number) => void;
   fitWindowsToWorkspace: (workspaceWidth: number, workspaceHeight: number) => void;
   registerLifecycle: (id: string, lifecycle: WindowLifecycle) => () => void;
+  updateWindow: (id: string, patch: Partial<Pick<WorkspaceWindow, 'resourceName' | 'resourceUid' | 'namespace' | 'editorMode' | 'editorKind' | 'editorContent' | 'editorSavedContent'>>) => void;
 }
 
 const WorkspaceWindowsContext = createContext<WorkspaceWindowsContextValue | null>(null);
@@ -78,13 +83,15 @@ function restoredWindows(userId?: string): WorkspaceWindow[] {
     const parsed = JSON.parse(localStorage.getItem(key) || '') as { version?: number; windows?: PersistedWorkspaceWindow[] };
     if (parsed.version !== STORAGE_VERSION || !Array.isArray(parsed.windows)) return [];
     const restored = parsed.windows.flatMap((item) => {
-      if (!item?.id || !['shell', 'files', 'logs'].includes(item.type) || !item.clusterId || !item.namespace || !item.resourceName) return [];
+      if (!item?.id || !['shell', 'files', 'logs', 'editor'].includes(item.type) || !item.clusterId || !item.namespace || !item.resourceName) return [];
+      if (item.type === 'editor' && typeof item.editorContent !== 'string') return [];
       const bounds = item.bounds;
       if (!bounds || ![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite)) return [];
+      const isEditor = item.type === 'editor';
       return [{
         ...item,
-        status: 'disconnected' as const,
-        statusMessage: '页面刷新后连接已断开',
+        status: isEditor ? 'connected' as const : 'disconnected' as const,
+        statusMessage: isEditor ? '编辑草稿已恢复' : '页面刷新后连接已断开',
         dirty: false,
         connectOnMount: false,
         connectionRevision: 0,
@@ -99,7 +106,9 @@ function restoredWindows(userId?: string): WorkspaceWindow[] {
 function defaultBounds(type: WorkspaceWindowType, offset: number): WindowBounds {
   const availableWidth = Math.max(320, window.innerWidth - 290);
   const availableHeight = Math.max(300, window.innerHeight - 150);
-  const preferred = type === 'files' ? { width: 1040, height: 680 } : { width: 900, height: 560 };
+  const preferred = type === 'editor'
+    ? { width: 1120, height: 720 }
+    : type === 'files' ? { width: 1040, height: 680 } : { width: 900, height: 560 };
   const width = Math.min(preferred.width, Math.max(320, availableWidth - 28));
   const height = Math.min(preferred.height, Math.max(300, availableHeight - 24));
   const cascade = (offset * 28) % 168;
@@ -116,7 +125,8 @@ function sameTarget(left: OpenWorkspaceWindow, right: OpenWorkspaceWindow) {
     && left.clusterId === right.clusterId
     && left.namespace === right.namespace
     && left.resourceName === right.resourceName
-    && left.container === right.container;
+    && left.container === right.container
+    && left.editorKind === right.editorKind;
 }
 
 export function WorkspaceWindowsProvider({ children }: { children: ReactNode }) {
@@ -142,6 +152,10 @@ export function WorkspaceWindowsProvider({ children }: { children: ReactNode }) 
       resourceName: item.resourceName,
       resourceUid: item.resourceUid,
       container: item.container,
+      editorMode: item.editorMode,
+      editorKind: item.editorKind,
+      editorContent: item.editorContent,
+      editorSavedContent: item.editorSavedContent,
       minimized: item.minimized,
       maximized: item.maximized,
       bounds: item.bounds,
@@ -193,13 +207,14 @@ export function WorkspaceWindowsProvider({ children }: { children: ReactNode }) 
     const item: WorkspaceWindow = {
       ...input,
       id,
-      status: 'connecting',
+      status: input.type === 'editor' ? 'connected' : 'connecting',
+      statusMessage: input.type === 'editor' ? '编辑器已打开' : undefined,
       minimized: false,
       maximized: false,
       bounds: defaultBounds(input.type, windowsRef.current.length),
       zIndex: nextZIndex(),
       dirty: false,
-      connectOnMount: true,
+      connectOnMount: input.type !== 'editor',
       connectionRevision: 0,
       createdAt: Date.now(),
     };
@@ -288,6 +303,10 @@ export function WorkspaceWindowsProvider({ children }: { children: ReactNode }) 
     return () => lifecycleRef.current.delete(id);
   }, []);
 
+  const updateWindow = useCallback((id: string, patch: Partial<Pick<WorkspaceWindow, 'resourceName' | 'resourceUid' | 'namespace' | 'editorMode' | 'editorKind' | 'editorContent' | 'editorSavedContent'>>) => {
+    setWindows((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item));
+  }, []);
+
   const saveAndClose = async () => {
     if (!closeRequest) return;
     const lifecycle = lifecycleRef.current.get(closeRequest.id);
@@ -317,7 +336,8 @@ export function WorkspaceWindowsProvider({ children }: { children: ReactNode }) 
     toggleMaximized,
     fitWindowsToWorkspace,
     registerLifecycle,
-  }), [fitWindowsToWorkspace, focusWindow, minimizeWindow, openWindow, reconnectWindow, registerLifecycle, removeWindow, requestClose, restoreWindow, setWindowDirty, setWindowStatus, toggleMaximized, updateWindowBounds, windows]);
+    updateWindow,
+  }), [fitWindowsToWorkspace, focusWindow, minimizeWindow, openWindow, reconnectWindow, registerLifecycle, removeWindow, requestClose, restoreWindow, setWindowDirty, setWindowStatus, toggleMaximized, updateWindow, updateWindowBounds, windows]);
 
   return (
     <WorkspaceWindowsContext.Provider value={value}>
@@ -330,7 +350,7 @@ export function WorkspaceWindowsProvider({ children }: { children: ReactNode }) 
         width="440px"
         footer={<><Button variant="ghost" onClick={() => setCloseRequest(undefined)}>取消</Button><Button variant="danger" onClick={() => closeTarget && removeWindow(closeTarget.id)}>关闭窗口</Button></>}
       >
-        <p className="confirm-copy">关闭 <strong>{closeTarget?.resourceName}</strong> 的{closeTarget?.type === 'shell' ? '终端' : closeTarget?.type === 'files' ? '文件' : '日志'}窗口后，当前连接将断开。</p>
+        <p className="confirm-copy">关闭 <strong>{closeTarget?.resourceName}</strong> 的{closeTarget?.type === 'shell' ? '终端' : closeTarget?.type === 'files' ? '文件' : closeTarget?.type === 'editor' ? 'YAML 编辑器' : '日志'}窗口{closeTarget?.type === 'editor' ? '。' : '后，当前连接将断开。'}</p>
       </Modal>
       <UnsavedChangesPrompt
         open={Boolean(closeTarget && closeRequest?.dirty)}

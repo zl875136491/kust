@@ -40,7 +40,7 @@ function ThemeSelector() {
   return <div className="segmented" aria-label="主题模式">{options.map((option) => <IconButton key={option.value} label={option.label} active={mode === option.value} onClick={() => setMode(option.value)}>{option.icon}</IconButton>)}</div>;
 }
 
-export function TopBar({ cluster, onMenu, onSearch }: { cluster?: Cluster; onMenu: () => void; onSearch: () => void }) {
+export function TopBar({ cluster, onMenu, onSearch, onNotifications }: { cluster?: Cluster; onMenu: () => void; onSearch: () => void; onNotifications: () => void }) {
   const { user, logout } = useAuth();
   const { getResources, clusters } = useData();
   const location = useLocation();
@@ -143,7 +143,7 @@ export function TopBar({ cluster, onMenu, onSearch }: { cluster?: Cluster; onMen
           <Search size={16} /><span>搜索资源</span><kbd><Command size={11} />K</kbd>
         </button>
         <ThemeSelector />
-        <IconButton label="通知" onClick={() => navigate('/notifications')}><Bell size={18} /><i className="notification-dot" /></IconButton>
+        <IconButton label="通知" onClick={onNotifications}><Bell size={18} /><i className="notification-dot" /></IconButton>
         <div className="account-menu" ref={accountRef}>
           <button
             ref={accountButtonRef}

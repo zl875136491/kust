@@ -3,11 +3,11 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { useData } from '../data-context';
-import { resourceDescriptors } from '../navigation';
-import type { ResourceRow } from '../types';
-import { ResourceDrawer } from '../components/ResourceDrawer';
+import { useAuth } from '../auth-context';
+import { ResourceDrawer, type ResourceDrawerEntry } from '../components/ResourceDrawer';
 import { ResourceTable } from '../components/ResourceTable';
 import { Button, EmptyState, IconButton, Spinner, StatusPill } from '../components/ui';
+import { descriptorForRow } from '../resource-utils';
 
 function CircularStat({
   label,
@@ -40,9 +40,11 @@ function CircularStat({
 export function OverviewPage() {
   const { clusterId = '' } = useParams();
   const { clusters, getOverview } = useData();
+  const { user } = useAuth();
   const cluster = clusters.find((item) => item.id === clusterId);
   const [warningsOnly, setWarningsOnly] = useState(true);
-  const [selectedRow, setSelectedRow] = useState<ResourceRow>();
+  const [drawerStack, setDrawerStack] = useState<ResourceDrawerEntry[]>([]);
+  const canWriteResources = Boolean(user?.roles.some((role) => role === 'admin' || role === 'operator'));
   const query = useQuery({
     queryKey: ['overview', clusterId],
     queryFn: () => getOverview(clusterId),
@@ -55,7 +57,10 @@ export function OverviewPage() {
   if (query.error || !query.data) return <div className="page"><EmptyState icon={<ServerCrash size={24} />} title="无法读取集群" body={query.error instanceof Error ? query.error.message : undefined} action={<Button onClick={() => void query.refetch()}>重试</Button>} /></div>;
   const overview = query.data;
   const warningEvents = warningsOnly ? overview.events.filter((event) => event.status === 'Warning') : overview.events;
-  const descriptor = selectedRow ? Object.values(resourceDescriptors).find((item) => item.singular === selectedRow.kind) : undefined;
+  const openRelated = (entry: ResourceDrawerEntry) => setDrawerStack((current) => {
+    const existingIndex = current.findIndex((candidate) => candidate.row.uid === entry.row.uid);
+    return existingIndex >= 0 ? current.slice(0, existingIndex + 1) : [...current, entry];
+  });
 
   return (
     <div className="page overview-page">
@@ -72,14 +77,14 @@ export function OverviewPage() {
 
       <section className="content-section glass-card">
         <div className="section-toolbar"><div><h2>工作负载</h2><span>{overview.workloads.length}</span></div></div>
-        <ResourceTable rows={overview.workloads.slice(0, 8)} showKind onOpen={setSelectedRow} />
+        <ResourceTable rows={overview.workloads.slice(0, 8)} showKind onOpen={(row) => setDrawerStack([{ descriptor: descriptorForRow(row), row }])} />
       </section>
 
       <section className="content-section glass-card">
         <div className="section-toolbar"><div><h2>事件</h2><span>{overview.events.length}</span></div><label className="switch-control"><input type="checkbox" checked={warningsOnly} onChange={(event) => setWarningsOnly(event.target.checked)} /><i /><span>仅警告 ({overview.events.filter((event) => event.status === 'Warning').length})</span></label></div>
         {warningEvents.length === 0 ? <EmptyState icon={<TriangleAlert size={23} />} title="没有警告事件" /> : <div className="resource-table-wrap"><table className="resource-table events-table"><thead><tr><th>类型</th><th>对象</th><th>命名空间</th><th>原因</th><th>消息</th><th>最后出现</th></tr></thead><tbody>{warningEvents.map((event) => <tr key={event.uid}><td><StatusPill status={event.status} /></td><td>{String(event.details.objectKind || '')}: <strong>{String(event.details.objectName || event.name)}</strong></td><td>{event.namespace || '-'}</td><td>{String(event.details.reason || '-')}</td><td className="event-message">{String(event.details.message || '-')}</td><td className="muted-cell">{event.details.lastSeen ? new Date(String(event.details.lastSeen)).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '-'}</td></tr>)}</tbody></table></div>}
       </section>
-      {selectedRow && descriptor && <ResourceDrawer clusterId={clusterId} descriptor={descriptor} row={selectedRow} onClose={() => setSelectedRow(undefined)} />}
+      <ResourceDrawer clusterId={clusterId} stack={drawerStack} canWriteResources={canWriteResources} onCloseTop={() => setDrawerStack((current) => current.slice(0, -1))} onOpenRelated={openRelated} onPopTo={(index) => setDrawerStack((current) => current.slice(0, index + 1))} />
     </div>
   );
 }

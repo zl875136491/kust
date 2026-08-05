@@ -100,6 +100,16 @@ export const api = {
       `/clusters/${clusterId}/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/scale`,
       { method: 'PATCH', body: JSON.stringify({ replicas }) },
     ),
+  scaleWorkload: (clusterId: string, kind: string, namespace: string, name: string, replicas: number) =>
+    request<ResourceRow>(
+      `/clusters/${clusterId}/workloads/${encodeURIComponent(kind)}/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/scale`,
+      { method: 'PATCH', body: JSON.stringify({ replicas }) },
+    ),
+  restartWorkload: (clusterId: string, kind: string, namespace: string, name: string) =>
+    request<ResourceRow>(
+      `/clusters/${clusterId}/workloads/${encodeURIComponent(kind)}/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/restart`,
+      { method: 'POST' },
+    ),
   podLogs: (clusterId: string, namespace: string, name: string, container?: string, tailLines = 500) => {
     const params = new URLSearchParams({ tailLines: String(tailLines) });
     if (container) params.set('container', container);

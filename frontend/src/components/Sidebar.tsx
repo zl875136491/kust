@@ -23,6 +23,7 @@ interface SidebarProps {
   onCloseMobile: () => void;
   onAddCluster: () => void;
   onApply: () => void;
+  onNotifications: () => void;
   canManageClusters: boolean;
   canWriteResources: boolean;
   isAdmin: boolean;
@@ -36,6 +37,7 @@ export function Sidebar({
   onCloseMobile,
   onAddCluster,
   onApply,
+  onNotifications,
   canManageClusters,
   canWriteResources,
   isAdmin,
@@ -176,9 +178,9 @@ export function Sidebar({
               <Button variant="primary" icon={<CirclePlus size={17} />} onClick={onAddCluster}>添加集群</Button>
             )
           ) : null}
-          <NavLink to="/notifications" className="nav-item" onClick={closeOnMobile} title={!expandedView ? '通知' : undefined}>
+          <button type="button" className="nav-item" onClick={() => { onNotifications(); closeOnMobile(); }} title={!expandedView ? '通知' : undefined}>
             <Bell size={18} /><span>通知</span>
-          </NavLink>
+          </button>
           <NavLink to="/settings" className="nav-item" onClick={closeOnMobile} title={!expandedView ? '个人设置' : undefined}>
             <Settings size={18} /><span>个人设置</span>
           </NavLink>

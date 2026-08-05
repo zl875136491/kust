@@ -1,4 +1,4 @@
-import { Check, ChevronRight, KeyRound, Laptop, LoaderCircle, LogOut, Moon, Palette, Rows3, ShieldCheck, Sparkles, Sun } from 'lucide-react';
+import { Check, ChevronRight, KeyRound, Laptop, LoaderCircle, LogOut, Moon, Palette, Rows3, ShieldCheck, Sparkles, Sun, TerminalSquare } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
@@ -6,10 +6,11 @@ import { useAuth } from '../auth-context';
 import { Button, Modal, useToast } from '../components/ui';
 import { usePreferences } from '../preferences-context';
 import { useThemeMode } from '../theme-context';
-import type { ThemeMode, UserSettings } from '../types';
+import type { ShellTheme, ThemeMode, UserSettings } from '../types';
 import { useVisualEffects } from '../visual-effects-context';
+import { shellThemeOptions } from '../shell-themes';
 
-type SettingsView = 'appearance' | 'effects' | 'resources' | 'security';
+type SettingsView = 'appearance' | 'effects' | 'terminal' | 'resources' | 'security';
 
 export function SettingsPage() {
   const { mode: theme, setMode: setTheme } = useThemeMode();
@@ -21,6 +22,7 @@ export function SettingsPage() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [rows, setRows] = useState(25);
   const [windowCloseConfirmation, setWindowCloseConfirmation] = useState(true);
+  const [shellTheme, setShellTheme] = useState<ShellTheme>('system');
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
   const [rememberDays, setRememberDays] = useState(7);
   const [saving, setSaving] = useState(false);
@@ -34,6 +36,7 @@ export function SettingsPage() {
     setAutoRefresh(settings.autoRefresh);
     setRows(settings.pageSize);
     setWindowCloseConfirmation(settings.windowCloseConfirmation);
+    setShellTheme(settings.shellTheme);
     setTwoFactorEnabled(settings.twoFactorEnabled);
     setRememberDays(settings.twoFactorRememberDays);
   }, [settings]);
@@ -44,6 +47,7 @@ export function SettingsPage() {
   const views: { value: SettingsView; label: string; description: string; icon: React.ReactNode }[] = [
     { value: 'appearance', label: '外观', description: '主题与显示模式', icon: <Palette size={18} /> },
     { value: 'effects', label: '视觉效果', description: '玻璃材质与动效', icon: <Sparkles size={18} /> },
+    { value: 'terminal', label: '终端', description: 'Shell 配色方案', icon: <TerminalSquare size={18} /> },
     { value: 'resources', label: '资源与窗口', description: '列表与工作区行为', icon: <Rows3 size={18} /> },
     { value: 'security', label: '安全', description: '账号与双重认证', icon: <ShieldCheck size={18} /> },
   ];
@@ -55,11 +59,11 @@ export function SettingsPage() {
   ] as const;
   const maxRememberDays = isAdmin ? 15 : 30;
   const payload = useMemo<UserSettings>(() => ({
-    theme, ...effects, autoRefresh, pageSize: rows, windowCloseConfirmation,
+    theme, shellTheme, ...effects, autoRefresh, pageSize: rows, windowCloseConfirmation,
     twoFactorEnabled: isAdmin ? true : twoFactorEnabled,
     twoFactorRequired: isAdmin,
     twoFactorRememberDays: Math.min(maxRememberDays, Math.max(1, rememberDays)),
-  }), [autoRefresh, effects, isAdmin, maxRememberDays, rememberDays, rows, theme, twoFactorEnabled, windowCloseConfirmation]);
+  }), [autoRefresh, effects, isAdmin, maxRememberDays, rememberDays, rows, shellTheme, theme, twoFactorEnabled, windowCloseConfirmation]);
   const saveSettings = async () => { setSaving(true); try { await save(payload); pushToast('设置已保存到账号'); } catch (reason) { pushToast(reason instanceof Error ? reason.message : '保存失败', 'error'); } finally { setSaving(false); } };
   const changePassword = async () => { try { await api.changePassword(passwords.current, passwords.next); setPasswords({ current: '', next: '' }); setPasswordOpen(false); pushToast('密码已更新'); return true; } catch (reason) { pushToast(reason instanceof Error ? reason.message : '修改失败', 'error'); return false; } };
 
@@ -97,6 +101,24 @@ export function SettingsPage() {
             <div><strong>{label}</strong><span>{description}</span>{experimental && <span className="setting-note--experimental">实验性功能，可能造成性能问题</span>}</div>
             <label className="switch-control"><input aria-label={label} type="checkbox" checked={effects[key]} onChange={(event) => setEffect(key, event.target.checked)} /><i /></label>
           </div>)}
+        </section>}
+
+        {activeView === 'terminal' && <section id="settings-panel-terminal" aria-labelledby="settings-nav-terminal" className="settings-section settings-panel glass-card">
+          <header><TerminalSquare size={19} /><div><h3>终端</h3><p>选择独立于网站明暗模式的 Shell 配色</p></div></header>
+          <div className="terminal-theme-options">{shellThemeOptions.map((item) => <button
+            key={item.value}
+            type="button"
+            className={shellTheme === item.value ? 'is-selected' : ''}
+            aria-pressed={shellTheme === item.value}
+            onClick={() => setShellTheme(item.value)}
+          >
+            <span className="terminal-theme-preview" style={{ background: item.preview.background, color: item.preview.foreground }}>
+              <i style={{ background: item.preview.cursor }} />
+              <code>$ kubectl get pods</code>
+            </span>
+            <span className="terminal-theme-copy"><strong>{item.label}</strong><small>{item.description}</small></span>
+            {shellTheme === item.value && <Check size={15} />}
+          </button>)}</div>
         </section>}
 
         {activeView === 'resources' && <section id="settings-panel-resources" aria-labelledby="settings-nav-resources" className="settings-section settings-panel glass-card">

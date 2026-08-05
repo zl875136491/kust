@@ -130,6 +130,14 @@ pub fn router(state: SharedState, config: &AppConfig) -> Result<Router, AppError
             patch(scale_deployment),
         )
         .route(
+            "/api/clusters/{cluster_id}/workloads/{kind}/{namespace}/{name}/scale",
+            patch(scale_workload),
+        )
+        .route(
+            "/api/clusters/{cluster_id}/workloads/{kind}/{namespace}/{name}/restart",
+            post(restart_workload),
+        )
+        .route(
             "/api/clusters/{cluster_id}/pods/{namespace}/{name}/logs",
             get(pod_logs),
         )
@@ -431,6 +439,34 @@ async fn scale_deployment(
     let client = state.kube_client(&cluster_id).await?;
     let row = kubernetes::scale_deployment(client, &namespace, &name, request.replicas).await?;
     cache::sync_kind(&state, &cluster_id, "deployments").await?;
+    Ok(Json(row))
+}
+
+async fn scale_workload(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((cluster_id, kind, namespace, name)): Path<(String, String, String, String)>,
+    Json(request): Json<ScaleRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    require_resource_write(&state, &headers).await?;
+    let client = state.kube_client(&cluster_id).await?;
+    let normalized = cache::normalize_kind(&kind);
+    let row = kubernetes::scale_workload(client, &normalized, &namespace, &name, request.replicas)
+        .await?;
+    cache::sync_kind(&state, &cluster_id, &normalized).await?;
+    Ok(Json(row))
+}
+
+async fn restart_workload(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((cluster_id, kind, namespace, name)): Path<(String, String, String, String)>,
+) -> Result<impl IntoResponse, AppError> {
+    require_resource_write(&state, &headers).await?;
+    let client = state.kube_client(&cluster_id).await?;
+    let normalized = cache::normalize_kind(&kind);
+    let row = kubernetes::restart_workload(client, &normalized, &namespace, &name).await?;
+    cache::sync_kind(&state, &cluster_id, &normalized).await?;
     Ok(Json(row))
 }
 

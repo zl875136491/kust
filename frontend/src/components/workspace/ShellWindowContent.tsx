@@ -2,19 +2,22 @@ import '@xterm/xterm/css/xterm.css';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal } from '@xterm/xterm';
+import { Minus, Plus } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, api } from '../../api';
+import { usePreferences } from '../../preferences-context';
+import { resolveShellTheme } from '../../shell-themes';
 import { useThemeMode } from '../../theme-context';
 import { useWorkspaceWindows, type WorkspaceWindow } from '../../workspace-windows-context';
+import { IconButton } from '../ui';
 
-function terminalTheme(mode: 'light' | 'dark') {
-  return mode === 'dark'
-    ? { background: '#0b1013', foreground: '#e4ece8', cursor: '#55e7a1', selectionBackground: '#275944' }
-    : { background: '#f7faf8', foreground: '#1d2923', cursor: '#08764b', selectionBackground: '#bfe8d3' };
-}
+const MIN_FONT_SIZE = 10;
+const MAX_FONT_SIZE = 22;
+const DEFAULT_FONT_SIZE = 13;
 
 export function ShellWindowContent({ item }: { item: WorkspaceWindow }) {
   const { resolved } = useThemeMode();
+  const { settings } = usePreferences();
   const { setWindowStatus } = useWorkspaceWindows();
   const terminalHost = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | undefined>(undefined);
@@ -22,6 +25,9 @@ export function ShellWindowContent({ item }: { item: WorkspaceWindow }) {
   const socketRef = useRef<WebSocket | undefined>(undefined);
   const initiallyDisconnected = useRef(!item.connectOnMount);
   const [terminalReady, setTerminalReady] = useState(false);
+  const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE);
+  const shellTheme = settings?.shellTheme || 'system';
+  const palette = resolveShellTheme(shellTheme, resolved);
 
   useEffect(() => {
     if (!terminalHost.current) return;
@@ -30,9 +36,9 @@ export function ShellWindowContent({ item }: { item: WorkspaceWindow }) {
       convertEol: true,
       scrollback: 10_000,
       fontFamily: 'SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-      fontSize: 13,
+      fontSize: DEFAULT_FONT_SIZE,
       lineHeight: 1.2,
-      theme: terminalTheme(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'),
+      theme: resolveShellTheme('system', document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'),
     });
     const fit = new FitAddon();
     terminal.loadAddon(fit);
@@ -71,8 +77,17 @@ export function ShellWindowContent({ item }: { item: WorkspaceWindow }) {
   }, []);
 
   useEffect(() => {
-    if (terminalRef.current) terminalRef.current.options.theme = terminalTheme(resolved);
-  }, [resolved]);
+    if (terminalRef.current) terminalRef.current.options.theme = resolveShellTheme(shellTheme, resolved);
+  }, [resolved, shellTheme]);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal || !terminalReady) return;
+    terminal.options.fontSize = fontSize;
+    window.setTimeout(() => {
+      try { fitRef.current?.fit(); } catch { /* The window may be between resize frames. */ }
+    }, 0);
+  }, [fontSize, terminalReady]);
 
   useEffect(() => {
     if (!terminalReady || (!item.connectOnMount && item.connectionRevision === 0)) return;
@@ -133,10 +148,14 @@ export function ShellWindowContent({ item }: { item: WorkspaceWindow }) {
   return (
     <div className="workspace-tool workspace-shell">
       <div className="workspace-tool__toolbar">
-        <span><i className="tool-dot" />{item.clusterName || item.clusterId}</span>
+        <div className="shell-font-controls" aria-label="终端字号">
+          <IconButton label="减小终端字号" onClick={() => setFontSize((current) => Math.max(MIN_FONT_SIZE, current - 1))} disabled={fontSize <= MIN_FONT_SIZE}><Minus size={14} /></IconButton>
+          <span aria-live="polite">{fontSize}px</span>
+          <IconButton label="增大终端字号" onClick={() => setFontSize((current) => Math.min(MAX_FONT_SIZE, current + 1))} disabled={fontSize >= MAX_FONT_SIZE}><Plus size={14} /></IconButton>
+        </div>
         <small>{item.namespace} / {item.resourceName}{item.container ? ` / ${item.container}` : ''}</small>
       </div>
-      <div className="xterm-host workspace-xterm-host" ref={terminalHost} />
+      <div className="xterm-host workspace-xterm-host" ref={terminalHost} style={{ background: palette.background }} />
     </div>
   );
 }

@@ -6,13 +6,15 @@ import { navigationGroups } from '../navigation';
 import { AddClusterModal } from './ClusterModals';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
-import { YamlApplyModal } from './YamlApplyModal';
 import { EmptyState, Modal } from './ui';
 import { api } from '../api';
 import type { SearchResult } from '../types';
 import { useAuth } from '../auth-context';
 import { WorkspaceWindowsProvider, useWorkspaceWindows } from '../workspace-windows-context';
 import { WorkspaceDesktop } from './WorkspaceDesktop';
+import { useNamespaceSelection } from '../namespace-context';
+import { newResourceEditorWindow } from '../resource-utils';
+import { NotificationsModal } from '../pages/NotificationsPage';
 
 export function AppLayout() {
   return <WorkspaceWindowsProvider><AppLayoutContent /></WorkspaceWindowsProvider>;
@@ -20,7 +22,8 @@ export function AppLayout() {
 
 function AppLayoutContent() {
   const { user } = useAuth();
-  const { windows } = useWorkspaceWindows();
+  const { windows, openWindow } = useWorkspaceWindows();
+  const { getNamespace } = useNamespaceSelection();
   const isAdmin = Boolean(user?.roles.includes('admin'));
   const canManageClusters = isAdmin;
   const canWriteResources = Boolean(user?.roles.some((role) => role === 'admin' || role === 'operator'));
@@ -35,7 +38,7 @@ function AppLayoutContent() {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('kust-sidebar-collapsed') === 'true');
   const [mobileOpen, setMobileOpen] = useState(false);
   const [addClusterOpen, setAddClusterOpen] = useState(false);
-  const [applyOpen, setApplyOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [resourceResults, setResourceResults] = useState<SearchResult[]>([]);
@@ -90,6 +93,12 @@ function AppLayoutContent() {
   const searchItems: Array<{ label: string; meta: string; path: string; status?: string }> = search.trim().length >= 2
     ? [...resourceResults.map((item) => ({ label: item.title, meta: item.subtitle, path: item.path, status: item.status })), ...navigationItems]
     : navigationItems;
+  const openCreateResource = () => {
+    if (!cluster) return;
+    const routeKind = location.pathname.match(/\/resources\/([^/]+)/)?.[1] || 'deployments';
+    const namespace = new URLSearchParams(location.search).get('namespace') || getNamespace(cluster.id);
+    openWindow(newResourceEditorWindow(cluster, namespace, routeKind));
+  };
 
   return (
     <div className={`app-shell ${collapsed ? 'sidebar-collapsed' : ''} ${windows.length ? 'has-workspace-windows' : ''}`}>
@@ -100,16 +109,17 @@ function AppLayoutContent() {
         onToggle={toggleSidebar}
         onCloseMobile={() => setMobileOpen(false)}
         onAddCluster={() => setAddClusterOpen(true)}
-        onApply={() => setApplyOpen(true)}
+        onApply={openCreateResource}
+        onNotifications={() => setNotificationsOpen(true)}
         canManageClusters={canManageClusters}
         canWriteResources={canWriteResources}
         isAdmin={isAdmin}
       />
-      <TopBar cluster={cluster} onMenu={() => setMobileOpen(true)} onSearch={() => setSearchOpen(true)} />
+      <TopBar cluster={cluster} onMenu={() => setMobileOpen(true)} onSearch={() => setSearchOpen(true)} onNotifications={() => setNotificationsOpen(true)} />
       <main className="app-main"><Outlet context={{ cluster }} /></main>
       <WorkspaceDesktop />
       <AddClusterModal open={canManageClusters && addClusterOpen} onClose={() => setAddClusterOpen(false)} />
-      {cluster && canWriteResources && <YamlApplyModal cluster={cluster} open={applyOpen} onClose={() => setApplyOpen(false)} />}
+      <NotificationsModal open={notificationsOpen && location.pathname !== '/notifications'} onClose={() => setNotificationsOpen(false)} cluster={cluster} />
       <Modal open={searchOpen} onClose={() => setSearchOpen(false)} title="全局搜索" width="620px">
         <div className="command-search"><Search size={18} /><input autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder="集群、资源或页面" /></div>
         <div className="command-results">

@@ -24,6 +24,8 @@ interface DataContextValue {
   deleteResource: (clusterId: string, kind: string, row: ResourceRow) => Promise<void>;
   getResourceYaml: (clusterId: string, kind: string, row: ResourceRow) => Promise<string>;
   scaleDeployment: (clusterId: string, namespace: string, name: string, replicas: number) => Promise<ResourceRow>;
+  scaleWorkload: (clusterId: string, kind: string, namespace: string, name: string, replicas: number) => Promise<ResourceRow>;
+  restartWorkload: (clusterId: string, kind: string, namespace: string, name: string) => Promise<ResourceRow>;
   getPodLogs: (clusterId: string, namespace: string, name: string, container?: string) => Promise<string>;
   applyYaml: (clusterId: string, yaml: string, namespace?: string) => Promise<{ kind: string; name: string; namespace?: string }>;
 }
@@ -97,6 +99,16 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       api.scaleDeployment(clusterId, namespace, name, replicas),
     [],
   );
+  const scaleWorkload = useCallback(
+    (clusterId: string, kind: string, namespace: string, name: string, replicas: number) =>
+      api.scaleWorkload(clusterId, kind, namespace, name, replicas),
+    [],
+  );
+  const restartWorkload = useCallback(
+    (clusterId: string, kind: string, namespace: string, name: string) =>
+      api.restartWorkload(clusterId, kind, namespace, name),
+    [],
+  );
   const getPodLogs = useCallback(
     async (clusterId: string, namespace: string, name: string, container?: string) =>
       (await api.podLogs(clusterId, namespace, name, container)).logs,
@@ -109,9 +121,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo<DataContextValue>(() => ({
     clusters, loadingClusters, clusterError, refreshClusters, createCluster, updateCluster, deleteCluster,
-    getOverview, getResources, deleteResource, getResourceYaml, scaleDeployment, getPodLogs, applyYaml,
+    getOverview, getResources, deleteResource, getResourceYaml, scaleDeployment, scaleWorkload, restartWorkload, getPodLogs, applyYaml,
   }), [clusters, loadingClusters, clusterError, refreshClusters, createCluster, updateCluster, deleteCluster,
-    getOverview, getResources, deleteResource, getResourceYaml, scaleDeployment, getPodLogs, applyYaml]);
+    getOverview, getResources, deleteResource, getResourceYaml, scaleDeployment, scaleWorkload, restartWorkload, getPodLogs, applyYaml]);
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
 }

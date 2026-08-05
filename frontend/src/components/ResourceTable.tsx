@@ -2,6 +2,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown, Boxes } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { ResourceRow } from '../types';
 import { EmptyState, Spinner, StatusPill } from './ui';
+import { ResourceActionMenu, type ResourceAction } from './ResourceActionMenu';
 
 function age(timestamp?: string) {
   if (!timestamp) return '-';
@@ -22,6 +23,8 @@ export function ResourceTable({
   selected,
   onSelected,
   onOpen,
+  canWriteResources = false,
+  onAction,
 }: {
   rows: ResourceRow[];
   loading?: boolean;
@@ -30,6 +33,8 @@ export function ResourceTable({
   selected?: Set<string>;
   onSelected?: (selected: Set<string>) => void;
   onOpen: (row: ResourceRow) => void;
+  canWriteResources?: boolean;
+  onAction?: (action: ResourceAction, row: ResourceRow) => void;
 }) {
   const [sort, setSort] = useState<{ key: SortKey; direction: 'asc' | 'desc' }>({ key: 'name', direction: 'asc' });
   const hasNamespace = rows.some((row) => row.namespace);
@@ -79,6 +84,7 @@ export function ResourceTable({
           {hasRestarts && <th className="number-cell">重启</th>}
           {hasNode && <th>节点</th>}
           <th><button onClick={() => setSortKey('createdAt')}>存续时间 <SortIcon column="createdAt" /></button></th>
+          {onAction && <th className="resource-actions-cell">操作</th>}
         </tr></thead>
         <tbody>{sortedRows.map((row) => (
           <tr key={row.uid} className={selectionMode && selected?.has(row.uid) ? 'is-selected' : ''} onClick={() => selectionMode ? toggleRow(row.uid) : onOpen(row)}>
@@ -91,6 +97,7 @@ export function ResourceTable({
             {hasRestarts && <td className="number-cell mono-cell">{row.restarts ?? '-'}</td>}
             {hasNode && <td>{row.node || '-'}</td>}
             <td className="muted-cell">{age(row.createdAt)}</td>
+            {onAction && <td className="resource-actions-cell" onClick={(event) => event.stopPropagation()}><ResourceActionMenu row={row} canWriteResources={canWriteResources} onAction={onAction} /></td>}
           </tr>
         ))}</tbody>
       </table>

@@ -1,4 +1,5 @@
 export type ThemeMode = 'system' | 'light' | 'dark';
+export type ShellTheme = 'system' | 'light' | 'dark' | 'one-dark' | 'dracula' | 'solarized-dark' | 'nord' | 'gruvbox-dark' | 'tokyo-night';
 
 export interface Cluster {
   id: string;
@@ -42,6 +43,16 @@ export interface ResourceRow {
   createdAt?: string;
   node?: string;
   labels: Record<string, string>;
+  annotations: Record<string, string>;
+  ownerReferences: Array<{
+    apiVersion: string;
+    kind: string;
+    name: string;
+    uid: string;
+    controller: boolean;
+  }>;
+  generation?: number;
+  resourceVersion?: string;
   details: Record<string, unknown>;
 }
 
@@ -159,6 +170,7 @@ export interface AuthCapabilities {
 
 export interface UserSettings {
   theme: ThemeMode;
+  shellTheme: ShellTheme;
   pointerHighlight: boolean;
   refraction: boolean;
   backdropBlur: boolean;

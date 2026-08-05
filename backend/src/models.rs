@@ -97,6 +97,17 @@ impl From<ClusterDocument> for ClusterResponse {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ResourceReference {
+    pub api_version: String,
+    pub kind: String,
+    pub name: String,
+    pub uid: String,
+    #[serde(default)]
+    pub controller: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ResourceRow {
     pub uid: String,
     pub name: String,
@@ -108,6 +119,14 @@ pub struct ResourceRow {
     pub created_at: Option<String>,
     pub node: Option<String>,
     pub labels: BTreeMap<String, String>,
+    #[serde(default)]
+    pub annotations: BTreeMap<String, String>,
+    #[serde(default)]
+    pub owner_references: Vec<ResourceReference>,
+    #[serde(default)]
+    pub generation: Option<i64>,
+    #[serde(default)]
+    pub resource_version: Option<String>,
     pub details: Value,
 }
 
@@ -480,6 +499,8 @@ pub struct UserSettingsDocument {
     pub id: ObjectId,
     pub user_id: ObjectId,
     pub theme: String,
+    #[serde(default = "default_shell_theme")]
+    pub shell_theme: String,
     pub pointer_highlight: bool,
     pub refraction: bool,
     pub backdrop_blur: bool,
@@ -499,12 +520,17 @@ fn default_window_close_confirmation() -> bool {
     true
 }
 
+fn default_shell_theme() -> String {
+    "system".into()
+}
+
 impl UserSettingsDocument {
     pub fn new(user_id: ObjectId) -> Self {
         Self {
             id: ObjectId::new(),
             user_id,
             theme: "system".into(),
+            shell_theme: default_shell_theme(),
             pointer_highlight: false,
             refraction: false,
             backdrop_blur: true,
@@ -522,6 +548,7 @@ impl UserSettingsDocument {
 #[serde(rename_all = "camelCase")]
 pub struct UserSettingsResponse {
     pub theme: String,
+    pub shell_theme: String,
     pub pointer_highlight: bool,
     pub refraction: bool,
     pub backdrop_blur: bool,
@@ -538,6 +565,8 @@ pub struct UserSettingsResponse {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateSettingsRequest {
     pub theme: String,
+    #[serde(default = "default_shell_theme")]
+    pub shell_theme: String,
     pub pointer_highlight: bool,
     pub refraction: bool,
     pub backdrop_blur: bool,
@@ -695,6 +724,7 @@ mod tests {
         assert!(!settings.refraction);
         assert!(settings.backdrop_blur);
         assert!(settings.hover_motion);
+        assert_eq!(settings.shell_theme, "system");
         assert_eq!(
             settings.visual_effects_version,
             USER_SETTINGS_VISUAL_EFFECTS_VERSION
