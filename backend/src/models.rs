@@ -22,9 +22,59 @@ pub struct ClusterDocument {
     pub preset_key: Option<String>,
     #[serde(default)]
     pub owner_user_id: Option<ObjectId>,
+    #[serde(default)]
+    pub member_user_ids: Vec<ObjectId>,
     pub created_at: DateTime,
     pub updated_at: DateTime,
     pub last_connected_at: Option<DateTime>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditLogDocument {
+    #[serde(rename = "_id")]
+    pub id: ObjectId,
+    pub actor_user_id: Option<ObjectId>,
+    pub action: String,
+    pub target: Option<String>,
+    pub cluster_id: Option<ObjectId>,
+    pub metadata: serde_json::Value,
+    pub created_at: DateTime,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditQuery {
+    pub action: Option<String>,
+    pub user_id: Option<String>,
+    pub cluster_id: Option<String>,
+    pub limit: Option<i64>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditLogResponse {
+    pub id: String,
+    pub actor_user_id: Option<String>,
+    pub action: String,
+    pub target: Option<String>,
+    pub cluster_id: Option<String>,
+    pub metadata: serde_json::Value,
+    pub created_at: String,
+}
+
+impl From<AuditLogDocument> for AuditLogResponse {
+    fn from(value: AuditLogDocument) -> Self {
+        Self {
+            id: value.id.to_hex(),
+            actor_user_id: value.actor_user_id.map(|id| id.to_hex()),
+            action: value.action,
+            target: value.target,
+            cluster_id: value.cluster_id.map(|id| id.to_hex()),
+            metadata: value.metadata,
+            created_at: value.created_at.try_to_rfc3339_string().unwrap_or_default(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -46,6 +96,12 @@ pub struct UpdateClusterRequest {
     pub kubeconfig: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateClusterMembersRequest {
+    pub user_ids: Vec<String>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClusterResponse {
@@ -62,6 +118,8 @@ pub struct ClusterResponse {
     pub preset: bool,
     pub read_only: bool,
     pub source: String,
+    #[serde(default)]
+    pub member_count: usize,
 }
 
 impl From<ClusterDocument> for ClusterResponse {
@@ -91,6 +149,7 @@ impl From<ClusterDocument> for ClusterResponse {
             preset: source == "preset",
             read_only: value.read_only,
             source,
+            member_count: value.member_user_ids.len() + usize::from(value.owner_user_id.is_some()),
         }
     }
 }

@@ -87,6 +87,13 @@ async fn create_indexes(database: &Database) -> Result<(), AppError> {
         doc! { "cluster_id": 1, "synced_at": -1 },
     )
     .await?;
+    index(database, "audit_logs", doc! { "created_at": -1 }).await?;
+    index(
+        database,
+        "audit_logs",
+        doc! { "actor_user_id": 1, "action": 1 },
+    )
+    .await?;
     ttl(database, "sessions", "expires_at").await?;
     ttl(database, "trusted_devices", "expires_at").await?;
     ttl(database, "auth_codes", "expires_at").await?;

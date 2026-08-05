@@ -108,6 +108,7 @@ pub async fn sync_preset_clusters(
             read_only: true,
             preset_key: Some(preset.preset_key),
             owner_user_id: None,
+            member_user_ids: Vec::new(),
             created_at: existing
                 .as_ref()
                 .map(|value| value.created_at)

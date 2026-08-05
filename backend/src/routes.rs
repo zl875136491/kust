@@ -28,8 +28,9 @@ use crate::{
     error::AppError,
     kubernetes,
     models::{
-        ApplyResourceRequest, ClusterDocument, ClusterResponse, CreateClusterRequest,
-        HealthResponse, LogsQuery, LogsResponse, ResourceQuery, ScaleRequest, SearchQuery,
+        ApplyResourceRequest, AuditLogDocument, AuditLogResponse, AuditQuery, ClusterDocument,
+        ClusterResponse, CreateClusterRequest, HealthResponse, LogsQuery, LogsResponse,
+        ResourceQuery, ScaleRequest, SearchQuery, UpdateClusterMembersRequest,
         UpdateClusterRequest, YamlResponse,
     },
     state::{client_from_kubeconfig, SharedState},
@@ -108,11 +109,16 @@ pub fn router(state: SharedState, config: &AppConfig) -> Result<Router, AppError
             "/api/admin/users/{user_id}/reset-code",
             post(auth_routes::admin_reset_code),
         )
+        .route("/api/admin/audit-logs", get(admin_audit_logs))
         .route("/api/search", get(global_search))
         .route("/api/clusters", get(list_clusters).post(create_cluster))
         .route(
             "/api/clusters/{cluster_id}",
             patch(update_cluster).delete(delete_cluster),
+        )
+        .route(
+            "/api/clusters/{cluster_id}/members",
+            get(cluster_members).put(update_cluster_members),
         )
         .route("/api/clusters/{cluster_id}/overview", get(cluster_overview))
         .route("/api/clusters/{cluster_id}/map", get(resource_map))
@@ -182,10 +188,18 @@ async fn list_clusters(
     State(state): State<SharedState>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<ClusterResponse>>, AppError> {
-    auth::authenticate(&state, &headers, "authenticated").await?;
+    let actor = auth::authenticate(&state, &headers, "authenticated").await?;
     let cursor = state
         .clusters
-        .find(doc! {})
+        .find(if actor.user.is_admin() {
+            doc! {}
+        } else {
+            doc! { "$or": [
+                { "source": "preset" },
+                { "owner_user_id": actor.user.id },
+                { "member_user_ids": actor.user.id },
+            ] }
+        })
         .sort(doc! { "created_at": 1 })
         .await?;
     let clusters: Vec<ClusterDocument> = cursor.try_collect().await?;
@@ -262,11 +276,21 @@ async fn create_cluster(
         read_only: false,
         preset_key: None,
         owner_user_id: Some(actor.user.id),
+        member_user_ids: Vec::new(),
         created_at: now,
         updated_at: now,
         last_connected_at: version.map(|_| now),
     };
     state.clusters.insert_one(&document).await?;
+    write_audit(
+        &state,
+        Some(actor.user.id),
+        "cluster.create",
+        Some(&document.name),
+        Some(document.id),
+        serde_json::json!({}),
+    )
+    .await?;
     Ok((StatusCode::CREATED, Json(ClusterResponse::from(document))))
 }
 
@@ -353,6 +377,68 @@ async fn update_cluster(
         .replace_one(doc! { "_id": cluster.id }, &cluster)
         .await?;
     Ok(Json(cluster.into()))
+}
+
+async fn cluster_members(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(cluster_id): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    auth::require_admin(&state, &headers).await?;
+    let cluster = state.cluster(&cluster_id).await?;
+    let ids = cluster
+        .member_user_ids
+        .iter()
+        .chain(cluster.owner_user_id.iter())
+        .copied()
+        .collect::<Vec<_>>();
+    let users: Vec<crate::models::UserDocument> = state
+        .users
+        .find(doc! { "_id": { "$in": ids } })
+        .await?
+        .try_collect()
+        .await?;
+    Ok(Json(
+        serde_json::json!({ "ownerUserId": cluster.owner_user_id.map(|id| id.to_hex()), "members": users.into_iter().map(|user| user.response()).collect::<Vec<_>>() }),
+    ))
+}
+
+async fn update_cluster_members(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(cluster_id): Path<String>,
+    Json(request): Json<UpdateClusterMembersRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let actor = auth::require_admin(&state, &headers).await?;
+    let mut cluster = state.cluster(&cluster_id).await?;
+    if cluster.read_only || cluster.source == "preset" {
+        return Err(AppError::forbidden("preset cluster configs are read-only"));
+    }
+    let mut ids = Vec::new();
+    for id in request.user_ids {
+        ids.push(ObjectId::parse_str(id).map_err(|_| AppError::bad_request("user id is invalid"))?);
+    }
+    ids.sort();
+    ids.dedup();
+    ids.retain(|id| Some(*id) != cluster.owner_user_id);
+    cluster.member_user_ids = ids;
+    cluster.updated_at = DateTime::now();
+    state
+        .clusters
+        .replace_one(doc! { "_id": cluster.id }, &cluster)
+        .await?;
+    write_audit(
+        &state,
+        Some(actor.user.id),
+        "cluster.members.update",
+        Some(&cluster.name),
+        Some(cluster.id),
+        serde_json::json!({ "memberCount": cluster.member_user_ids.len() }),
+    )
+    .await?;
+    Ok(Json(
+        serde_json::json!({ "memberCount": cluster.member_user_ids.len() }),
+    ))
 }
 
 async fn delete_cluster(
@@ -667,6 +753,64 @@ async fn require_resource_write(
         return Err(AppError::forbidden("resource write permission is required"));
     }
     Ok(actor)
+}
+
+async fn write_audit(
+    state: &SharedState,
+    actor_user_id: Option<ObjectId>,
+    action: &str,
+    target: Option<&str>,
+    cluster_id: Option<ObjectId>,
+    metadata: serde_json::Value,
+) -> Result<(), AppError> {
+    state
+        .database
+        .collection::<AuditLogDocument>("audit_logs")
+        .insert_one(AuditLogDocument {
+            id: ObjectId::new(),
+            actor_user_id,
+            action: action.into(),
+            target: target.map(str::to_owned),
+            cluster_id,
+            metadata,
+            created_at: DateTime::now(),
+        })
+        .await?;
+    Ok(())
+}
+
+async fn admin_audit_logs(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Query(query): Query<AuditQuery>,
+) -> Result<Json<Vec<AuditLogResponse>>, AppError> {
+    auth::require_admin(&state, &headers).await?;
+    let mut filter = doc! {};
+    if let Some(action) = query.action {
+        filter.insert("action", action);
+    }
+    if let Some(user_id) = query
+        .user_id
+        .and_then(|value| ObjectId::parse_str(value).ok())
+    {
+        filter.insert("actor_user_id", user_id);
+    }
+    if let Some(cluster_id) = query
+        .cluster_id
+        .and_then(|value| ObjectId::parse_str(value).ok())
+    {
+        filter.insert("cluster_id", cluster_id);
+    }
+    let logs: Vec<AuditLogDocument> = state
+        .database
+        .collection("audit_logs")
+        .find(filter)
+        .sort(doc! { "created_at": -1 })
+        .limit(query.limit.unwrap_or(100).clamp(1, 500))
+        .await?
+        .try_collect()
+        .await?;
+    Ok(Json(logs.into_iter().map(Into::into).collect()))
 }
 
 async fn stream_shell(
