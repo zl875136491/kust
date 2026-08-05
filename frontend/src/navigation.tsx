@@ -39,6 +39,10 @@ export const navigationGroups: NavigationGroup[] = [
       { kind: 'replicasets', label: 'ReplicaSets', singular: 'ReplicaSet', namespaced: true, group: 'workloads' },
       { kind: 'jobs', label: 'Jobs', singular: 'Job', namespaced: true, group: 'workloads' },
       { kind: 'cronjobs', label: 'CronJobs', singular: 'CronJob', namespaced: true, group: 'workloads' },
+      { kind: 'replicationcontrollers', label: 'ReplicationControllers', singular: 'ReplicationController', namespaced: true, group: 'workloads' },
+      { kind: 'controllerrevisions', label: 'Controller Revisions', singular: 'ControllerRevision', namespaced: true, group: 'workloads' },
+      { kind: 'horizontalpodautoscalers', label: 'Horizontal Pod Autoscalers', singular: 'HorizontalPodAutoscaler', namespaced: true, group: 'workloads' },
+      { kind: 'poddisruptionbudgets', label: 'Pod Disruption Budgets', singular: 'PodDisruptionBudget', namespaced: true, group: 'workloads' },
     ],
   },
   {
@@ -47,6 +51,7 @@ export const navigationGroups: NavigationGroup[] = [
       { kind: 'persistentvolumeclaims', label: 'Persistent Volume Claims', singular: 'PersistentVolumeClaim', namespaced: true, group: 'storage' },
       { kind: 'persistentvolumes', label: 'Persistent Volumes', singular: 'PersistentVolume', namespaced: false, group: 'storage' },
       { kind: 'storageclasses', label: 'Storage Classes', singular: 'StorageClass', namespaced: false, group: 'storage' },
+      { kind: 'volumeattachments', label: 'Volume Attachments', singular: 'VolumeAttachment', namespaced: false, group: 'storage' },
     ],
   },
   {
@@ -77,6 +82,9 @@ export const navigationGroups: NavigationGroup[] = [
       { kind: 'rolebindings', label: 'Role Bindings', singular: 'RoleBinding', namespaced: true, group: 'security' },
       { kind: 'clusterroles', label: 'Cluster Roles', singular: 'ClusterRole', namespaced: false, group: 'security' },
       { kind: 'clusterrolebindings', label: 'Cluster Role Bindings', singular: 'ClusterRoleBinding', namespaced: false, group: 'security' },
+      { kind: 'priorityclasses', label: 'Priority Classes', singular: 'PriorityClass', namespaced: false, group: 'security' },
+      { kind: 'runtimeclasses', label: 'Runtime Classes', singular: 'RuntimeClass', namespaced: false, group: 'security' },
+      { kind: 'leases', label: 'Leases', singular: 'Lease', namespaced: true, group: 'security' },
     ],
   },
   {
@@ -84,6 +92,9 @@ export const navigationGroups: NavigationGroup[] = [
     items: [
       { kind: 'configmaps', label: 'Config Maps', singular: 'ConfigMap', namespaced: true, group: 'config' },
       { kind: 'secrets', label: 'Secrets', singular: 'Secret', namespaced: true, group: 'config' },
+      { kind: 'resourcequotas', label: 'Resource Quotas', singular: 'ResourceQuota', namespaced: true, group: 'config' },
+      { kind: 'limitranges', label: 'Limit Ranges', singular: 'LimitRange', namespaced: true, group: 'config' },
+      { kind: 'customresourcedefinitions', label: 'Custom Resource Definitions', singular: 'CustomResourceDefinition', namespaced: false, group: 'config' },
     ],
   },
 ];
