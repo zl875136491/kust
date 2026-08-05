@@ -63,6 +63,54 @@ pub struct AuditLogResponse {
     pub created_at: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationDocument {
+    #[serde(rename = "_id")]
+    pub id: ObjectId,
+    pub user_id: ObjectId,
+    pub cluster_id: Option<ObjectId>,
+    pub kind: String,
+    pub resource_name: Option<String>,
+    pub severity: String,
+    pub title: String,
+    pub message: String,
+    pub read_at: Option<DateTime>,
+    pub created_at: DateTime,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationResponse {
+    pub id: String,
+    pub cluster_id: Option<String>,
+    pub kind: String,
+    pub resource_name: Option<String>,
+    pub severity: String,
+    pub title: String,
+    pub message: String,
+    pub read_at: Option<String>,
+    pub created_at: String,
+}
+
+impl From<NotificationDocument> for NotificationResponse {
+    fn from(value: NotificationDocument) -> Self {
+        Self {
+            id: value.id.to_hex(),
+            cluster_id: value.cluster_id.map(|id| id.to_hex()),
+            kind: value.kind,
+            resource_name: value.resource_name,
+            severity: value.severity,
+            title: value.title,
+            message: value.message,
+            read_at: value
+                .read_at
+                .and_then(|date| date.try_to_rfc3339_string().ok()),
+            created_at: value.created_at.try_to_rfc3339_string().unwrap_or_default(),
+        }
+    }
+}
+
 impl From<AuditLogDocument> for AuditLogResponse {
     fn from(value: AuditLogDocument) -> Self {
         Self {

@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useData } from '../data-context';
+import { api } from '../api';
 import type { Cluster } from '../types';
 import { Button, EmptyState, Modal, Spinner, StatusPill } from '../components/ui';
 
@@ -14,6 +15,7 @@ export function NotificationsModal({ open, onClose, cluster: contextualCluster }
   const { clusters, getResources } = useData();
   const cluster = contextualCluster || clusters.find((item) => item.status === 'connected') || clusters[0];
   const [read, setRead] = useState<Set<string>>(new Set());
+  const persistentQuery = useQuery({ queryKey: ['persistent-notifications', cluster?.id], queryFn: () => api.notifications(cluster?.id), enabled: open });
   const [unreadOnly, setUnreadOnly] = useState(false);
   const query = useQuery({
     queryKey: ['notifications', cluster?.id],
@@ -21,7 +23,7 @@ export function NotificationsModal({ open, onClose, cluster: contextualCluster }
     enabled: open && Boolean(cluster),
   });
   const events = (query.data?.items || []).filter((event) => !unreadOnly || !read.has(event.uid));
-  const markAllRead = () => setRead(new Set((query.data?.items || []).map((event) => event.uid)));
+  const markAllRead = async () => { setRead(new Set((query.data?.items || []).map((event) => event.uid))); await api.markAllNotificationsRead().catch(() => undefined); await persistentQuery.refetch(); };
 
   return <Modal
     open={open}

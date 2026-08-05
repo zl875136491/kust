@@ -29,6 +29,18 @@ export interface AuditLog {
   createdAt: string;
 }
 
+export interface Notification {
+  id: string;
+  clusterId?: string;
+  kind: string;
+  resourceName?: string;
+  severity: string;
+  title: string;
+  message: string;
+  readAt?: string;
+  createdAt: string;
+}
+
 export interface CreateClusterPayload {
   name: string;
   description: string;

@@ -7,7 +7,7 @@ import type {
   ResourceRow,
   FileTreeResponse,
   AuthCapabilities, AuthState, PlatformSettings, PlatformSettingsUpdate, RegistrationProfile, ResourceMapResponse,
-  Role, SearchResult, User, UserSettings, AuditLog, MetricsSummary, PodContainersResponse,
+  Role, SearchResult, User, UserSettings, AuditLog, MetricsSummary, PodContainersResponse, Notification,
 } from './types';
 import { APP_BASE_PATH } from './runtime-config';
 import { MOCK_MODE } from './runtime-config';
@@ -31,6 +31,7 @@ async function mockRequest<T>(path: string, init?: RequestInit): Promise<T> {
   if (path === '/admin/settings') return { ...mockPlatform } as T;
   if (path === '/admin/users') return [mockUser] as T;
   if (path === '/admin/roles') return mockRoles as T;
+  if (path.startsWith('/admin/audit-logs')) return [] as T;
   if (path === '/clusters') return [mockCluster] as T;
   if (path.includes('/resources/events')) return { kind: 'EventList', items: mockEvents } as T;
   if (path.includes('/resources/')) return { kind: 'ResourceList', items: [] } as T;
@@ -102,6 +103,9 @@ export const api = {
   updateUserStatus: (id: string, disabled: boolean) => request<User>(`/admin/users/${id}/status`, { method: 'PATCH', body: JSON.stringify({ disabled }) }),
   adminResetCode: (id: string) => request<{ username: string; code: string; expiresInMinutes: number }>(`/admin/users/${id}/reset-code`, { method: 'POST' }),
   auditLogs: (limit = 100) => request<AuditLog[]>(`/admin/audit-logs?limit=${limit}`),
+  notifications: (clusterId?: string) => request<Notification[]>(`/notifications?limit=100${clusterId ? `&clusterId=${encodeURIComponent(clusterId)}` : ''}`),
+  markNotificationRead: (id: string) => request<void>(`/notifications/${id}/read`, { method: 'PATCH' }),
+  markAllNotificationsRead: () => request<void>('/notifications/read-all', { method: 'POST' }),
   changePassword: (currentPassword: string, newPassword: string) => request<void>('/auth/password/change', { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) }),
   search: (q: string, clusterId?: string) => { const params = new URLSearchParams({ q }); if (clusterId) params.set('clusterId', clusterId); return request<SearchResult[]>(`/search?${params}`); },
   resourceMap: (clusterId: string) => request<ResourceMapResponse>(`/clusters/${clusterId}/map`),

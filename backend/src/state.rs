@@ -39,6 +39,7 @@ pub struct AppState {
     pub auth_codes: Collection<AuthCodeDocument>,
     pub user_settings: Collection<UserSettingsDocument>,
     pub platform_settings: Collection<PlatformSettingsDocument>,
+    pub notifications: Collection<crate::models::NotificationDocument>,
     pub platform_config: Arc<tokio::sync::RwLock<PlatformSettingsDocument>>,
     pub secrets: SecretBox,
     pub config: Arc<AppConfig>,

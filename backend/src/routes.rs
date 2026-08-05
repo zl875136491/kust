@@ -30,8 +30,8 @@ use crate::{
     models::{
         ApplyResourceRequest, AuditLogDocument, AuditLogResponse, AuditQuery, ClusterDocument,
         ClusterResponse, CreateClusterRequest, HealthResponse, LogsQuery, LogsResponse,
-        ResourceQuery, ScaleRequest, SearchQuery, UpdateClusterMembersRequest,
-        UpdateClusterRequest, YamlResponse,
+        NotificationDocument, NotificationResponse, ResourceQuery, ScaleRequest, SearchQuery,
+        UpdateClusterMembersRequest, UpdateClusterRequest, YamlResponse,
     },
     state::{client_from_kubeconfig, SharedState},
 };
@@ -110,6 +110,15 @@ pub fn router(state: SharedState, config: &AppConfig) -> Result<Router, AppError
             post(auth_routes::admin_reset_code),
         )
         .route("/api/admin/audit-logs", get(admin_audit_logs))
+        .route("/api/notifications", get(list_notifications))
+        .route(
+            "/api/notifications/{notification_id}/read",
+            patch(mark_notification_read),
+        )
+        .route(
+            "/api/notifications/read-all",
+            post(mark_all_notifications_read),
+        )
         .route("/api/search", get(global_search))
         .route("/api/clusters", get(list_clusters).post(create_cluster))
         .route(
@@ -841,6 +850,63 @@ async fn admin_audit_logs(
         .try_collect()
         .await?;
     Ok(Json(logs.into_iter().map(Into::into).collect()))
+}
+
+async fn list_notifications(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Query(query): Query<crate::models::AuditQuery>,
+) -> Result<Json<Vec<NotificationResponse>>, AppError> {
+    let actor = auth::authenticate(&state, &headers, "authenticated").await?;
+    let mut filter = doc! { "user_id": actor.user.id };
+    if let Some(cluster_id) = query
+        .cluster_id
+        .and_then(|value| ObjectId::parse_str(value).ok())
+    {
+        filter.insert("cluster_id", cluster_id);
+    }
+    let items: Vec<NotificationDocument> = state
+        .notifications
+        .find(filter)
+        .sort(doc! { "created_at": -1 })
+        .limit(query.limit.unwrap_or(100).clamp(1, 500))
+        .await?
+        .try_collect()
+        .await?;
+    Ok(Json(items.into_iter().map(Into::into).collect()))
+}
+
+async fn mark_notification_read(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(notification_id): Path<String>,
+) -> Result<StatusCode, AppError> {
+    let actor = auth::authenticate(&state, &headers, "authenticated").await?;
+    let id = ObjectId::parse_str(notification_id)
+        .map_err(|_| AppError::bad_request("notification id is invalid"))?;
+    state
+        .notifications
+        .update_one(
+            doc! { "_id": id, "user_id": actor.user.id },
+            doc! { "$set": { "read_at": DateTime::now() } },
+        )
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn mark_all_notifications_read(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+) -> Result<StatusCode, AppError> {
+    let actor = auth::authenticate(&state, &headers, "authenticated").await?;
+    state
+        .notifications
+        .update_many(
+            doc! { "user_id": actor.user.id, "read_at": null },
+            doc! { "$set": { "read_at": DateTime::now() } },
+        )
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn stream_shell(
