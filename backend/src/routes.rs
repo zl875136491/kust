@@ -534,7 +534,7 @@ async fn delete_resource(
     headers: HeaderMap,
     Path((cluster_id, kind, namespace, name)): Path<(String, String, String, String)>,
 ) -> Result<StatusCode, AppError> {
-    require_resource_write(&state, &headers).await?;
+    require_cluster_resource_write(&state, &headers, &cluster_id).await?;
     let client = state.kube_client(&cluster_id).await?;
     let namespace = (namespace != "_").then_some(namespace.as_str());
     kubernetes::delete_resource(client, &kind, namespace, &name).await?;
@@ -560,7 +560,7 @@ async fn scale_deployment(
     Path((cluster_id, namespace, name)): Path<(String, String, String)>,
     Json(request): Json<ScaleRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    require_resource_write(&state, &headers).await?;
+    require_cluster_resource_write(&state, &headers, &cluster_id).await?;
     let client = state.kube_client(&cluster_id).await?;
     let row = kubernetes::scale_deployment(client, &namespace, &name, request.replicas).await?;
     cache::sync_kind(&state, &cluster_id, "deployments").await?;
@@ -573,7 +573,7 @@ async fn scale_workload(
     Path((cluster_id, kind, namespace, name)): Path<(String, String, String, String)>,
     Json(request): Json<ScaleRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    require_resource_write(&state, &headers).await?;
+    require_cluster_resource_write(&state, &headers, &cluster_id).await?;
     let client = state.kube_client(&cluster_id).await?;
     let normalized = cache::normalize_kind(&kind);
     let row = kubernetes::scale_workload(client, &normalized, &namespace, &name, request.replicas)
@@ -587,7 +587,7 @@ async fn restart_workload(
     headers: HeaderMap,
     Path((cluster_id, kind, namespace, name)): Path<(String, String, String, String)>,
 ) -> Result<impl IntoResponse, AppError> {
-    require_resource_write(&state, &headers).await?;
+    require_cluster_resource_write(&state, &headers, &cluster_id).await?;
     let client = state.kube_client(&cluster_id).await?;
     let normalized = cache::normalize_kind(&kind);
     let row = kubernetes::restart_workload(client, &normalized, &namespace, &name).await?;
@@ -632,7 +632,7 @@ async fn apply_yaml(
     Path(cluster_id): Path<String>,
     Json(request): Json<ApplyResourceRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    require_resource_write(&state, &headers).await?;
+    require_cluster_resource_write(&state, &headers, &cluster_id).await?;
     let client = state.kube_client(&cluster_id).await?;
     let response =
         kubernetes::apply_yaml(client, &request.yaml, request.namespace.as_deref()).await?;
@@ -675,7 +675,7 @@ async fn write_file(
     Path((cluster_id, namespace, name)): Path<(String, String, String)>,
     Json(request): Json<crate::models::FileWriteRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    require_resource_write(&state, &headers).await?;
+    require_cluster_resource_write(&state, &headers, &cluster_id).await?;
     let client = state.kube_client(&cluster_id).await?;
     let bytes = kubernetes::pod_write_file(
         client,
@@ -697,7 +697,7 @@ async fn make_directory(
     Path((cluster_id, namespace, name)): Path<(String, String, String)>,
     Json(request): Json<crate::models::DirectoryRequest>,
 ) -> Result<StatusCode, AppError> {
-    require_resource_write(&state, &headers).await?;
+    require_cluster_resource_write(&state, &headers, &cluster_id).await?;
     let client = state.kube_client(&cluster_id).await?;
     kubernetes::pod_make_directory(client, &namespace, &name, &request.path, request.container)
         .await?;
@@ -710,7 +710,7 @@ async fn delete_file(
     Path((cluster_id, namespace, name)): Path<(String, String, String)>,
     Query(query): Query<crate::models::FileQuery>,
 ) -> Result<StatusCode, AppError> {
-    require_resource_write(&state, &headers).await?;
+    require_cluster_resource_write(&state, &headers, &cluster_id).await?;
     let client = state.kube_client(&cluster_id).await?;
     kubernetes::pod_delete_file(client, &namespace, &name, &query.path, query.container).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -810,6 +810,23 @@ async fn require_resource_write(
         .any(|role| matches!(role.as_str(), "admin" | "operator"))
     {
         return Err(AppError::forbidden("resource write permission is required"));
+    }
+    Ok(actor)
+}
+
+async fn require_cluster_resource_write(
+    state: &SharedState,
+    headers: &HeaderMap,
+    cluster_id: &str,
+) -> Result<auth::AuthenticatedUser, AppError> {
+    let actor = require_resource_write(state, headers).await?;
+    let cluster = state.cluster(cluster_id).await?;
+    if !actor.user.is_admin()
+        && cluster.source != "preset"
+        && cluster.owner_user_id != Some(actor.user.id)
+        && !cluster.member_user_ids.contains(&actor.user.id)
+    {
+        return Err(AppError::forbidden("cluster access is not allowed"));
     }
     Ok(actor)
 }
