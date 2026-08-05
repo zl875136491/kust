@@ -2,6 +2,8 @@
 
 Kust 是一个面向平台团队与 Kubernetes 运维人员的多集群 Web 控制台。它采用无 Agent 架构，不向目标集群安装 CRD 或控制器；后端保存并使用 kubeconfig 访问 Kubernetes API，前端围绕资源浏览、YAML 变更和 Pod 现场操作提供桌面式工作区。
 
+![Kust Pod 资源管理与终端、文件、日志多窗口工作区](docs/images/main_show_case.png)
+
 > 本文描述当前代码已经实现的行为，不把演示界面或规划能力当作完成项。尚未完全落地的部分集中列在[当前边界](#当前边界)中。
 
 ## 项目定位
