@@ -10,6 +10,35 @@ import type {
   Role, SearchResult, User, UserSettings,
 } from './types';
 import { APP_BASE_PATH } from './runtime-config';
+import { MOCK_MODE } from './runtime-config';
+
+const mockNow = new Date().toISOString();
+const mockUser = { id: 'mock-admin', username: 'demo', displayName: '演示管理员', realName: '演示管理员', email: 'demo@kust.local', source: 'local', roles: ['admin'], disabled: false, passwordUnset: false, twoFactorEnabled: true, twoFactorRequired: true, twoFactorRememberDays: 7 };
+const mockCluster = { id: 'mock-cluster', name: '演示集群', description: '用于界面预览的本地演示集群', context: 'mock-context', server: 'https://kubernetes.mock.local', kubernetesVersion: 'v1.31.0', status: 'connected', createdAt: mockNow, lastConnectedAt: mockNow, warnings: 0, accent: '#0b8f5b', preset: true, readOnly: true, source: 'preset' };
+const mockSettings = { theme: 'dark', shellTheme: 'one-dark', pointerHighlight: false, refraction: false, backdropBlur: true, hoverMotion: true, autoRefresh: true, pageSize: 25, windowCloseConfirmation: true, twoFactorEnabled: true, twoFactorRequired: true, twoFactorRememberDays: 7 };
+const mockPlatform = { registrationEnabled: true, oaLoginEnabled: true, defaultRole: 'viewer', cacheTtlSeconds: 45, cacheSyncSeconds: 60, sessionTimeoutHours: 12, oaUserSourceConfigured: true, presetClustersReadOnly: true, updatedAt: mockNow };
+const mockRoles = [
+  { id: 'role-admin', name: 'admin', label: '管理员', permissions: ['clusters:*', 'resources:*', 'users:*', 'settings:*'], builtIn: true, createdAt: mockNow, updatedAt: mockNow },
+  { id: 'role-operator', name: 'operator', label: '运维人员', permissions: ['clusters:read', 'resources:*'], builtIn: true, createdAt: mockNow, updatedAt: mockNow },
+  { id: 'role-viewer', name: 'viewer', label: '只读用户', permissions: ['clusters:read', 'resources:read'], builtIn: true, createdAt: mockNow, updatedAt: mockNow },
+];
+const mockEvents = [{ uid: 'event-1', name: 'deployment-available', namespace: 'default', kind: 'Event', status: 'Normal', createdAt: mockNow, labels: {}, annotations: {}, ownerReferences: [], details: { reason: 'DeploymentAvailable', message: '演示集群中的 Deployment 已就绪' } }];
+
+async function mockRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  if (path === '/auth/me' || path === '/auth/login' || path === '/auth/register') return { user: mockUser, next: 'authenticated', token: 'kust-mock-token' } as T;
+  if (path === '/auth/capabilities') return { registrationEnabled: true, oaLoginEnabled: true } as T;
+  if (path === '/settings') return { ...mockSettings } as T;
+  if (path === '/admin/settings') return { ...mockPlatform } as T;
+  if (path === '/admin/users') return [mockUser] as T;
+  if (path === '/admin/roles') return mockRoles as T;
+  if (path === '/clusters') return [mockCluster] as T;
+  if (path.includes('/resources/events')) return { kind: 'EventList', items: mockEvents } as T;
+  if (path.includes('/resources/')) return { kind: 'ResourceList', items: [] } as T;
+  if (path === '/health') return { status: 'ok', database: 'connected' } as T;
+  if (init?.method === 'PUT' && path === '/settings') return { ...mockSettings } as T;
+  if (init?.method === 'PUT' && path === '/admin/settings') return { ...mockPlatform } as T;
+  return undefined as T;
+}
 
 const API_ROOT = import.meta.env.VITE_API_URL || `${APP_BASE_PATH}/api`;
 const WS_ROOT = API_ROOT.startsWith('http')
@@ -27,6 +56,7 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  if (MOCK_MODE) return mockRequest<T>(path, init);
   const token = localStorage.getItem('kust-session-token');
   const trusted = localStorage.getItem('kust-trusted-device');
   const response = await fetch(`${API_ROOT}${path}`, {

@@ -10,6 +10,7 @@ import type {
   UpdateClusterPayload,
 } from './types';
 import { useAuth } from './auth-context';
+import { MOCK_MODE } from './runtime-config';
 
 interface DataContextValue {
   clusters: Cluster[];
@@ -31,6 +32,11 @@ interface DataContextValue {
 }
 
 const DataContext = createContext<DataContextValue | null>(null);
+const mockCluster: Cluster = {
+  id: 'mock-cluster', name: '演示集群', description: '用于界面预览的本地演示集群', context: 'mock-context', server: 'https://kubernetes.mock.local',
+  kubernetesVersion: 'v1.31.0', status: 'connected', createdAt: new Date().toISOString(), lastConnectedAt: new Date().toISOString(),
+  warnings: 0, accent: '#0b8f5b', preset: true, readOnly: true, source: 'preset',
+};
 
 export function DataProvider({ children }: { children: React.ReactNode }) {
   const { user, next } = useAuth();
@@ -40,6 +46,12 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
   const refreshClusters = useCallback(async () => {
     setLoadingClusters(true);
+    if (MOCK_MODE) {
+      setClusters([mockCluster]);
+      setClusterError(undefined);
+      setLoadingClusters(false);
+      return;
+    }
     try {
       setClusters(await api.clusters());
       setClusterError(undefined);

@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from './api';
 import type { AuthState, User } from './types';
+import { MOCK_MODE } from './runtime-config';
 
 interface AuthContextValue {
   user?: User;
@@ -16,6 +17,11 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+const mockUser: User = {
+  id: 'mock-admin', username: 'demo', displayName: '演示管理员', realName: '演示管理员', email: 'demo@kust.local',
+  source: 'local', roles: ['admin'], disabled: false, passwordUnset: false, twoFactorEnabled: true, twoFactorRequired: true, twoFactorRememberDays: 7,
+};
+const mockAuth: AuthState = { user: mockUser, next: 'authenticated', token: 'kust-mock-token' };
 
 function persistState(state: AuthState) {
   if (state.token) localStorage.setItem('kust-session-token', state.token);
@@ -24,9 +30,9 @@ function persistState(state: AuthState) {
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient();
-  const [user, setUser] = useState<User>();
-  const [next, setNext] = useState<AuthState['next']>();
-  const [loading, setLoading] = useState(Boolean(localStorage.getItem('kust-session-token')));
+  const [user, setUser] = useState<User | undefined>(MOCK_MODE ? mockUser : undefined);
+  const [next, setNext] = useState<AuthState['next'] | undefined>(MOCK_MODE ? 'authenticated' : undefined);
+  const [loading, setLoading] = useState(!MOCK_MODE && Boolean(localStorage.getItem('kust-session-token')));
 
   const completeAuth = useCallback((state: AuthState) => {
     persistState(state);
@@ -47,10 +53,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
+  useEffect(() => {
+    if (MOCK_MODE) completeAuth(mockAuth);
+  }, [completeAuth]);
+
   const login = useCallback(async (username: string, password: string) => {
+    if (MOCK_MODE) { completeAuth(mockAuth); return; }
     completeAuth(await api.login(username, password));
   }, [completeAuth]);
   const register = useCallback(async (username: string, password: string, passwordConfirmation: string) => {
+    if (MOCK_MODE) { completeAuth(mockAuth); return; }
     completeAuth(await api.register(username, password, passwordConfirmation));
   }, [completeAuth]);
   const logout = useCallback(async () => {

@@ -1,4 +1,4 @@
-import { Check, ChevronRight, KeyRound, Laptop, LoaderCircle, LogOut, Moon, Palette, Rows3, ShieldCheck, Sparkles, Sun, TerminalSquare } from 'lucide-react';
+import { Check, ChevronRight, KeyRound, Laptop, LoaderCircle, LogOut, Moon, Palette, Rows3, ShieldCheck, Sun, TerminalSquare } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
@@ -10,7 +10,7 @@ import type { ShellTheme, ThemeMode, UserSettings } from '../types';
 import { useVisualEffects } from '../visual-effects-context';
 import { shellThemeOptions } from '../shell-themes';
 
-type SettingsView = 'appearance' | 'effects' | 'terminal' | 'resources' | 'security';
+type SettingsView = 'appearance' | 'terminal' | 'resources' | 'security';
 
 export function SettingsPage() {
   const { mode: theme, setMode: setTheme } = useThemeMode();
@@ -45,8 +45,7 @@ export function SettingsPage() {
     { value: 'system', label: '系统', icon: <Laptop size={19} /> }, { value: 'light', label: '浅色', icon: <Sun size={19} /> }, { value: 'dark', label: '深色', icon: <Moon size={19} /> },
   ];
   const views: { value: SettingsView; label: string; description: string; icon: React.ReactNode }[] = [
-    { value: 'appearance', label: '外观', description: '主题与显示模式', icon: <Palette size={18} /> },
-    { value: 'effects', label: '视觉效果', description: '玻璃材质与动效', icon: <Sparkles size={18} /> },
+    { value: 'appearance', label: '外观效果', description: '主题、玻璃材质与动效', icon: <Palette size={18} /> },
     { value: 'terminal', label: '终端', description: 'Shell 配色方案', icon: <TerminalSquare size={18} /> },
     { value: 'resources', label: '资源与窗口', description: '列表与工作区行为', icon: <Rows3 size={18} /> },
     { value: 'security', label: '安全', description: '账号与双重认证', icon: <ShieldCheck size={18} /> },
@@ -91,12 +90,15 @@ export function SettingsPage() {
 
       <div className="settings-content">
         {activeView === 'appearance' && <section id="settings-panel-appearance" aria-labelledby="settings-nav-appearance" className="settings-section settings-panel glass-card">
-          <header><Palette size={19} /><div><h3>外观</h3><p>选择界面的明暗显示方式</p></div></header>
-          <div className="theme-options">{themes.map((item) => <button key={item.value} className={theme === item.value ? 'is-selected' : ''} onClick={() => setTheme(item.value)}>{item.icon}<span>{item.label}</span>{theme === item.value && <Check size={15} />}</button>)}</div>
-        </section>}
-
-        {activeView === 'effects' && <section id="settings-panel-effects" aria-labelledby="settings-nav-effects" className="settings-section settings-panel glass-card">
-          <header><Sparkles size={19} /><div><h3>视觉效果</h3><p>调整玻璃材质和界面动效</p></div></header>
+          <header><Palette size={19} /><div><h3>外观效果</h3><p>主题、玻璃材质和界面动效</p></div></header>
+          <div className="setting-row appearance-theme-row">
+            <div><strong>主题模式</strong><span>选择界面的明暗显示方式</span></div>
+            <div className="appearance-theme-options" role="radiogroup" aria-label="主题模式">
+              {themes.map((item) => <button key={item.value} type="button" role="radio" aria-checked={theme === item.value} className={theme === item.value ? 'is-selected' : ''} onClick={() => setTheme(item.value)}>
+                {item.icon}<span><strong>{item.label}</strong><small>{item.value === 'system' ? '跟随设备' : item.value === 'light' ? '明亮界面' : '深色界面'}</small></span>{theme === item.value && <Check size={14} />}
+              </button>)}
+            </div>
+          </div>
           {effectOptions.map(([key, label, description, experimental]) => <div className="setting-row" key={key}>
             <div><strong>{label}</strong><span>{description}</span>{experimental && <span className="setting-note--experimental">实验性功能，可能造成性能问题</span>}</div>
             <label className="switch-control"><input aria-label={label} type="checkbox" checked={effects[key]} onChange={(event) => setEffect(key, event.target.checked)} /><i /></label>

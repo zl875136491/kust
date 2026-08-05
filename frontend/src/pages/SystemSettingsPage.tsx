@@ -299,15 +299,20 @@ export function SystemSettingsPage() {
       )}
 
           {view === 'roles' && (
-            <div id="system-settings-panel-roles" aria-labelledby="system-settings-nav-roles" className="system-role-list settings-panel">
-          {roles.map((role) => (
-            <article className="role-admin-card settings-section glass-card" key={role.id}>
-              <header><ShieldCheck size={19} /><div><h3>{role.label}</h3><p>{role.name} · {role.builtIn ? '系统内置角色' : '自定义角色'}</p></div>{role.builtIn && <em>内置角色</em>}</header>
-              <div className="setting-row role-member-row"><div><strong>角色成员</strong><span>当前拥有该角色的用户数量</span></div><strong>{roleMemberCount(role.name)} 名用户</strong></div>
-              <div className="role-permissions"><div className="role-permissions__label"><strong>权限范围</strong><span>该角色可以执行的操作</span></div><div className="role-permissions__list">{role.permissions.map((permission) => <span key={permission}>{permissionLabels[permission] || permission}</span>)}</div></div>
-            </article>
-          ))}
-        </div>
+            <section id="system-settings-panel-roles" aria-labelledby="system-settings-nav-roles" className="role-list-panel settings-section settings-panel glass-card">
+              <header><ShieldCheck size={19} /><div><h3>角色管理</h3><p>查看角色成员和权限范围</p></div><span className="role-list-count">{roles.length} 个角色</span></header>
+              <div className="role-list-head" aria-hidden="true"><span>角色</span><span>类型</span><span>成员</span><span>权限范围</span></div>
+              <div className="role-list">
+                {roles.map((role) => (
+                  <div className="role-list-row" key={role.id}>
+                    <div className="role-list-identity"><span className="role-list-icon"><ShieldCheck size={16} /></span><span><strong>{role.label}</strong><small>{role.name}</small></span></div>
+                    <span className="role-list-type">{role.builtIn ? '内置角色' : '自定义角色'}</span>
+                    <strong className="role-list-members">{roleMemberCount(role.name)} 名用户</strong>
+                    <div className="role-list-permissions">{role.permissions.map((permission) => <span key={permission}>{permissionLabels[permission] || permission}</span>)}</div>
+                  </div>
+                ))}
+              </div>
+            </section>
           )}
         </div>
       </div>

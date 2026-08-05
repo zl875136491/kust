@@ -594,8 +594,8 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 0; accent-color: var
 .command-results button:hover { background: var(--accent-soft); }
 .command-results small { color: var(--text-muted); font-size: 9px; }
 
-.settings-workspace { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 12px; align-items: start; }
-.settings-sidebar.glass-card { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 3px; padding: 6px; overflow: hidden; }
+.settings-workspace { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 12px; align-items: stretch; min-height: calc(100dvh - 142px); }
+.settings-sidebar.glass-card { position: sticky; top: 12px; display: flex; height: 100%; flex-direction: column; gap: 3px; padding: 6px; overflow: hidden; }
 .settings-sidebar button { display: grid; grid-template-columns: 20px minmax(0, 1fr) 16px; align-items: center; gap: 9px; width: 100%; min-height: 58px; padding: 8px 9px; color: var(--text-secondary); background: transparent; border: 1px solid transparent; border-radius: 7px; cursor: pointer; text-align: left; transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease; }
 .settings-sidebar button:hover { color: var(--text); background: var(--surface-hover); }
 .settings-sidebar button:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 65%, transparent); outline-offset: -2px; }
@@ -607,7 +607,8 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 0; accent-color: var
 .settings-sidebar__copy strong, .settings-sidebar__copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .settings-sidebar__copy strong { color: inherit; font-size: 11px; }
 .settings-sidebar__copy small { color: var(--text-muted); font-size: 9px; }
-.settings-content { min-width: 0; }
+.settings-content { display: flex; min-width: 0; min-height: 0; }
+.settings-content > .settings-panel { width: 100%; min-height: 100%; }
 .settings-section { overflow: hidden; }
 .settings-panel { min-height: 330px; animation: settings-panel-in 220ms cubic-bezier(.16, 1, .3, 1); }
 @keyframes settings-panel-in { from { transform: translateX(8px); opacity: 0; } }
@@ -674,22 +675,27 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 0; accent-color: var
 .admin-user-row > .select-menu { min-width: 0; min-height: 36px; padding: 8px 10px; background: var(--surface-soft); border: 1px solid var(--border); border-radius: 9px; }
 .admin-user-actions { display: flex; justify-content: flex-end; gap: 5px; min-width: 0; }
 .role-admin-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-.system-role-list { display: grid; gap: 12px; }
-.role-admin-card { display: flex; min-height: 0; flex-direction: column; overflow: hidden; }
-.role-admin-card > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 62px; padding: 11px 13px; border-bottom: 1px solid var(--border); }
-.role-admin-card > header > div { display: flex; align-items: center; gap: 9px; min-width: 0; color: var(--accent); }
-.role-admin-card > header > div { display: grid; grid-template-columns: 19px minmax(0, 1fr); gap: 9px; }
-.role-admin-card > header > div > svg { grid-row: span 2; }
-.role-admin-card > header h3 { color: var(--text); font-size: 13px; }
-.role-admin-card > header p { margin: 2px 0 0; color: var(--text-muted); font-size: 9px; }
-.role-admin-card > header em { flex: 0 0 auto; padding: 3px 6px; color: var(--text-muted); background: var(--surface-soft); border: 1px solid var(--border); border-radius: 5px; font-size: 8px; font-style: normal; }
-.role-member-row > strong { color: var(--text); font-size: 11px; }
-.role-permissions { display: grid; gap: 9px; padding: 12px 13px 14px; }
-.role-permissions__label { display: grid; gap: 3px; }
-.role-permissions__label strong { font-size: 11px; }
-.role-permissions__label span { color: var(--text-muted); font-size: 9px; }
-.role-permissions__list { display: flex; align-content: flex-start; flex-wrap: wrap; gap: 6px; }
-.role-permissions span { height: max-content; padding: 6px 8px; color: var(--text-secondary); background: var(--surface-soft); border: 1px solid var(--border); border-radius: 6px; font-size: 9px; }
+.role-list-panel { overflow: hidden; }
+.role-list-panel > header { display: flex; align-items: center; gap: 9px; min-height: 62px; padding: 11px 13px; color: var(--accent); border-bottom: 1px solid var(--border); }
+.role-list-panel > header > div { display: grid; flex: 1; min-width: 0; gap: 2px; }
+.role-list-panel > header h3 { color: var(--text); font-size: 13px; }
+.role-list-panel > header p { margin: 0; color: var(--text-muted); font-size: 9px; }
+.role-list-count { color: var(--text-muted); font-size: 9px; white-space: nowrap; }
+.role-list-head, .role-list-row { display: grid; grid-template-columns: minmax(180px, 1.25fr) 120px 100px minmax(220px, 2fr); align-items: center; gap: 12px; }
+.role-list-head { min-height: 35px; padding: 0 13px; color: var(--text-muted); background: var(--glass-chip-fill); border-bottom: 1px solid var(--border); font-size: 9px; }
+.role-list-row { min-height: 67px; padding: 9px 13px; border-bottom: 1px solid var(--border); }
+.role-list-row:last-child { border-bottom: 0; }
+.role-list-row:hover { background: var(--surface-hover); }
+.role-list-identity { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.role-list-identity > span:last-child { display: grid; min-width: 0; gap: 3px; }
+.role-list-icon { display: grid; place-items: center; width: 30px; height: 30px; flex: 0 0 30px; color: var(--accent); background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border)); border-radius: 8px; }
+.role-list-identity strong, .role-list-identity small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.role-list-identity strong { font-size: 11px; }
+.role-list-identity small { color: var(--text-muted); font-size: 9px; }
+.role-list-type { color: var(--text-secondary); font-size: 10px; }
+.role-list-members { color: var(--text); font-size: 10px; font-weight: 650; }
+.role-list-permissions { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.role-list-permissions span { padding: 5px 7px; color: var(--text-secondary); background: var(--surface-soft); border: 1px solid var(--border); border-radius: 6px; font-size: 8px; white-space: nowrap; }
 .reset-code-panel { display: grid; gap: 9px; }
 .reset-code-panel > span, .reset-code-panel > small { color: var(--text-muted); font-size: 10px; }
 .reset-code-panel code { display: block; padding: 13px; overflow-wrap: anywhere; color: var(--text); background: var(--surface-soft); border: 1px solid var(--border); border-radius: 8px; font-family: "SFMono-Regular", Consolas, monospace; font-size: 13px; line-height: 1.6; user-select: all; }
@@ -755,6 +761,18 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 0; accent-color: var
 .theme-options button { position: relative; display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 72px; color: var(--text-secondary); background: var(--surface-soft); border: 1px solid var(--border); border-radius: 7px; cursor: pointer; font-size: 11px; }
 .theme-options button > svg:last-child { position: absolute; top: 7px; right: 7px; color: var(--accent); }
 .theme-options button.is-selected { color: var(--text); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.appearance-theme-row { align-items: stretch; min-height: 86px; }
+.appearance-theme-row > div:first-child { justify-content: center; }
+.appearance-theme-options { display: grid; grid-template-columns: repeat(3, minmax(128px, 1fr)); gap: 6px; width: min(530px, 58%); }
+.appearance-theme-options button { display: grid; grid-template-columns: 18px minmax(0, 1fr) 14px; align-items: center; gap: 8px; min-width: 0; padding: 8px 9px; color: var(--text-secondary); background: var(--surface-soft); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; text-align: left; }
+.appearance-theme-options button:hover { color: var(--text); background: var(--surface-hover); border-color: var(--border-strong); }
+.appearance-theme-options button.is-selected { color: var(--text); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 48%, var(--border)); box-shadow: inset 0 1px 0 var(--glass-specular-soft); }
+.appearance-theme-options button > svg:first-child { color: var(--text-muted); }
+.appearance-theme-options button.is-selected > svg:first-child, .appearance-theme-options button > svg:last-child { color: var(--accent); }
+.appearance-theme-options button > span { display: grid; min-width: 0; gap: 2px; }
+.appearance-theme-options button strong, .appearance-theme-options button small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.appearance-theme-options button strong { color: inherit; font-size: 10px; }
+.appearance-theme-options button small { color: var(--text-muted); font-size: 8px; }
 .terminal-theme-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 13px; }
 .terminal-theme-options > button { position: relative; display: grid; min-width: 0; gap: 9px; padding: 8px; color: var(--text-secondary); background: var(--surface-soft); border: 1px solid var(--border); border-radius: 7px; cursor: pointer; text-align: left; }
 .terminal-theme-options > button:hover { color: var(--text); background: var(--surface-hover); border-color: var(--border-strong); }
@@ -780,7 +798,7 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 0; accent-color: var
 .modal--notifications .modal__body { display: flex; min-height: 0; max-height: none; flex: 1; flex-direction: column; padding: 0; overflow: hidden; }
 .notifications-modal__toolbar { display: flex; min-height: 56px; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 13px; border-bottom: 1px solid var(--border); }
 .notifications-modal__toolbar .compact-tabs { margin: 0; }
-.notification-list--modal { flex: 1; min-height: 0; overflow: auto; }
+.notification-list--modal { flex: 1; min-height: 0; margin: 10px 12px 12px; overflow: auto; border: 1px solid var(--border); border-radius: 11px; background: color-mix(in srgb, var(--glass-control-fill) 64%, transparent); box-shadow: inset 0 1px 0 var(--glass-specular-soft); }
 .notification-list--modal .loading, .notification-list--modal .empty-state { min-height: 100%; }
 .notifications-route-host { min-height: 60vh; }
 .notification-item { display: grid; grid-template-columns: 36px minmax(0, 1fr) 12px; gap: 10px; width: 100%; min-height: 84px; padding: 13px; color: var(--text); background: transparent; border: 0; border-bottom: 1px solid var(--border); cursor: pointer; text-align: left; }
@@ -1278,16 +1296,25 @@ kbd,
   .modal--resource-editor .yaml-editor textarea { min-height: 0; }
   .theme-options { grid-template-columns: 1fr; }
   .theme-options button { min-height: 48px; }
+  .appearance-theme-row { align-items: stretch; flex-direction: column; }
+  .appearance-theme-options { width: 100%; }
+  .appearance-theme-options button { min-height: 54px; }
   .terminal-theme-options { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 10px; }
   .modal--notifications { height: calc(100dvh - 14px); }
   .notifications-modal__toolbar { align-items: stretch; flex-direction: column; }
   .notifications-modal__toolbar .button { align-self: flex-end; }
-  .settings-workspace { grid-template-columns: minmax(0, 1fr); }
-  .settings-sidebar.glass-card { position: relative; top: auto; flex-direction: row; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+  .settings-workspace { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  .settings-sidebar.glass-card { position: relative; top: auto; height: auto; flex-direction: row; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
   .settings-sidebar::-webkit-scrollbar { display: none; }
   .settings-sidebar button { min-width: 160px; flex: 0 0 160px; }
-  .settings-panel { min-height: 0; }
+  .settings-content > .settings-panel, .settings-panel { min-height: 0; }
   .system-settings-grid, .role-admin-grid { grid-template-columns: 1fr; }
+  .role-list-head { display: none; }
+  .role-list-row { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; min-height: 0; }
+  .role-list-identity { grid-column: 1; }
+  .role-list-type { grid-column: 2; justify-self: end; }
+  .role-list-members { grid-column: 1; }
+  .role-list-permissions { grid-column: 1 / -1; }
   .admin-list__toolbar { align-items: stretch; flex-direction: column; }
   .admin-user-search { width: 100%; }
   .admin-user-row { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
