@@ -236,24 +236,27 @@ export function SystemSettingsPage() {
 
         <div className="settings-content">
           {view === 'general' && (
-            <div id="system-settings-panel-general" aria-labelledby="system-settings-nav-general" className="settings-panel">
-              <div className="system-summary" aria-label="系统概览">
-                <article className="system-stat glass-card"><span><Users size={18} /></span><div><strong>{activeUsers}</strong><small>活跃用户 / {users.length}</small></div></article>
-                <article className="system-stat glass-card"><span><ShieldCheck size={18} /></span><div><strong>{roles.length}</strong><small>系统角色</small></div></article>
-                <article className="system-stat glass-card"><span><Activity size={18} /></span><div><strong>{clusters.length}</strong><small>集群 / {presetClusters} 个预设</small></div></article>
-                <article className="system-stat glass-card"><span><Database size={18} /></span><div><strong>{databaseConnected ? '正常' : '异常'}</strong><small>MongoDB</small></div></article>
-              </div>
-              <div className="system-settings-grid">
-          <section className="settings-section glass-card">
-            <header><UserCog size={19} /><h3>访问与身份</h3></header>
+            <div id="system-settings-panel-general" aria-labelledby="system-settings-nav-general" className="settings-panel system-settings-stack">
+              <section className="settings-section glass-card system-overview-section">
+                <header><Activity size={19} /><div><h3>系统概览</h3><p>平台运行状态与资源统计</p></div></header>
+                <div className="system-overview-list" aria-label="系统概览">
+                  <div className="system-overview-row"><span className="system-overview-icon"><Users size={16} /></span><div><strong>活跃用户</strong><small>当前可正常登录的账号</small></div><b>{activeUsers} <small>/ {users.length}</small></b></div>
+                  <div className="system-overview-row"><span className="system-overview-icon"><ShieldCheck size={16} /></span><div><strong>系统角色</strong><small>已配置的角色与权限集合</small></div><b>{roles.length}</b></div>
+                  <div className="system-overview-row"><span className="system-overview-icon"><Server size={16} /></span><div><strong>集群</strong><small>包含 {presetClusters} 个只读预设配置</small></div><b>{clusters.length}</b></div>
+                  <div className="system-overview-row"><span className="system-overview-icon"><Database size={16} /></span><div><strong>MongoDB</strong><small>平台数据缓存与用户设置存储</small></div><b className={databaseConnected ? 'is-success' : 'is-danger'}>{databaseConnected ? '正常' : '异常'}</b></div>
+                </div>
+              </section>
+
+              <section className="settings-section glass-card">
+                <header><UserCog size={19} /><div><h3>访问与身份</h3><p>注册、登录和默认账号策略</p></div></header>
             <div className="setting-row"><div><strong>开放用户注册</strong><span>允许通过已配置用户源创建账号</span></div><label className="switch-control"><input aria-label="开放用户注册" type="checkbox" checked={draft.registrationEnabled} onChange={(event) => setDraft({ ...draft, registrationEnabled: event.target.checked })} /><i /></label></div>
             <div className="setting-row"><div><strong>OA 快捷登录</strong><span>{draft.oaUserSourceConfigured ? '通过 OA 消息完成无密码登录' : 'OA 用户源未配置'}</span></div><label className="switch-control"><input aria-label="OA 快捷登录" type="checkbox" checked={draft.oaLoginEnabled} disabled={!draft.oaUserSourceConfigured} onChange={(event) => setDraft({ ...draft, oaLoginEnabled: event.target.checked })} /><i /></label></div>
             <div className="setting-row"><div><strong>新用户默认角色</strong><span>管理员角色不能作为注册默认值</span></div><div className="system-setting-select"><SelectMenu aria-label="新用户默认角色" value={draft.defaultRole} options={defaultRoleOptions} onChange={(defaultRole) => setDraft({ ...draft, defaultRole })} /></div></div>
             <div className="setting-row"><div><strong>登录会话有效期</strong><span>新会话 1-72 小时</span></div><div className="number-with-unit"><input className="number-input" aria-label="登录会话有效期" type="number" min={1} max={72} value={draft.sessionTimeoutHours} onChange={(event) => setDraft({ ...draft, sessionTimeoutHours: Number(event.target.value) })} /><span>小时</span></div></div>
-          </section>
+              </section>
 
-          <section className="settings-section glass-card">
-            <header><Database size={19} /><h3>缓存与同步</h3></header>
+              <section className="settings-section glass-card">
+                <header><Database size={19} /><div><h3>缓存与同步</h3><p>控制资源缓存和后台同步策略</p></div></header>
             <div className="setting-row"><div><strong>资源缓存有效期</strong><span>过期后在后台刷新，范围 15-600 秒</span></div><div className="number-with-unit"><input className="number-input" aria-label="资源缓存有效期" type="number" min={15} max={600} value={draft.cacheTtlSeconds} onChange={(event) => setDraft({ ...draft, cacheTtlSeconds: Number(event.target.value) })} /><span>秒</span></div></div>
             <div className="setting-row"><div><strong>全量同步周期</strong><span>后台同步所有集群资源，范围 15-3600 秒</span></div><div className="number-with-unit"><input className="number-input" aria-label="全量同步周期" type="number" min={15} max={3600} value={draft.cacheSyncSeconds} onChange={(event) => setDraft({ ...draft, cacheSyncSeconds: Number(event.target.value) })} /><span>秒</span></div></div>
             <div className="system-runtime-list">
@@ -262,8 +265,7 @@ export function SystemSettingsPage() {
               <div><Server size={15} /><span>预设集群配置</span><strong>{draft.presetClustersReadOnly ? '只读保护' : '可修改'}</strong></div>
               <div><Clock size={15} /><span>最近更新</span><strong>{new Date(draft.updatedAt).toLocaleString()}</strong></div>
             </div>
-          </section>
-              </div>
+              </section>
             </div>
           )}
 
@@ -297,12 +299,12 @@ export function SystemSettingsPage() {
       )}
 
           {view === 'roles' && (
-            <div id="system-settings-panel-roles" aria-labelledby="system-settings-nav-roles" className="role-admin-grid settings-panel">
+            <div id="system-settings-panel-roles" aria-labelledby="system-settings-nav-roles" className="system-role-list settings-panel">
           {roles.map((role) => (
-            <article className="role-admin-card glass-card" key={role.id}>
-              <header><div><ShieldCheck size={18} /><span><strong>{role.label}</strong><small>{role.name}</small></span></div>{role.builtIn && <em>内置角色</em>}</header>
-              <div className="role-permissions">{role.permissions.map((permission) => <span key={permission}>{permissionLabels[permission] || permission}</span>)}</div>
-              <footer><Users size={14} /><span>{roleMemberCount(role.name)} 名用户</span></footer>
+            <article className="role-admin-card settings-section glass-card" key={role.id}>
+              <header><ShieldCheck size={19} /><div><h3>{role.label}</h3><p>{role.name} · {role.builtIn ? '系统内置角色' : '自定义角色'}</p></div>{role.builtIn && <em>内置角色</em>}</header>
+              <div className="setting-row role-member-row"><div><strong>角色成员</strong><span>当前拥有该角色的用户数量</span></div><strong>{roleMemberCount(role.name)} 名用户</strong></div>
+              <div className="role-permissions"><div className="role-permissions__label"><strong>权限范围</strong><span>该角色可以执行的操作</span></div><div className="role-permissions__list">{role.permissions.map((permission) => <span key={permission}>{permissionLabels[permission] || permission}</span>)}</div></div>
             </article>
           ))}
         </div>
