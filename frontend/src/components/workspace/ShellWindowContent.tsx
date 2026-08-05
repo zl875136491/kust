@@ -2,12 +2,10 @@ import '@xterm/xterm/css/xterm.css';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal } from '@xterm/xterm';
-import { Crosshair } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, api } from '../../api';
 import { useThemeMode } from '../../theme-context';
 import { useWorkspaceWindows, type WorkspaceWindow } from '../../workspace-windows-context';
-import { Button } from '../ui';
 
 function terminalTheme(mode: 'light' | 'dark') {
   return mode === 'dark'
@@ -137,7 +135,6 @@ export function ShellWindowContent({ item }: { item: WorkspaceWindow }) {
       <div className="workspace-tool__toolbar">
         <span><i className="tool-dot" />{item.clusterName || item.clusterId}</span>
         <small>{item.namespace} / {item.resourceName}{item.container ? ` / ${item.container}` : ''}</small>
-        <Button variant="ghost" icon={<Crosshair size={15} />} onClick={() => terminalRef.current?.focus()}>聚焦</Button>
       </div>
       <div className="xterm-host workspace-xterm-host" ref={terminalHost} />
     </div>
