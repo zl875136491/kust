@@ -17,6 +17,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { useAuth } from '../auth-context';
+import { copyText } from '../browser-compat';
 import { Button, EmptyState, Modal, SelectMenu, useToast } from '../components/ui';
 import { useData } from '../data-context';
 import type { PlatformSettings, PlatformSettingsUpdate, Role, User } from '../types';
@@ -181,7 +182,7 @@ export function SystemSettingsPage() {
   const copyResetCode = async () => {
     if (!resetCode) return;
     try {
-      await navigator.clipboard.writeText(resetCode.code);
+      await copyText(resetCode.code);
       pushToast('重置码已复制');
     } catch {
       pushToast('浏览器未允许复制，请手动选中重置码', 'error');

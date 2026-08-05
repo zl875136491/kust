@@ -2,6 +2,7 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Modal, UnsavedChangesPrompt, useToast } from './components/ui';
 import { useAuth } from './auth-context';
+import { createClientId } from './browser-compat';
 import { usePreferences } from './preferences-context';
 
 export type WorkspaceWindowType = 'shell' | 'files' | 'logs';
@@ -188,7 +189,7 @@ export function WorkspaceWindowsProvider({ children }: { children: ReactNode }) 
       restoreWindow(existing.id);
       return existing.id;
     }
-    const id = crypto.randomUUID();
+    const id = createClientId();
     const item: WorkspaceWindow = {
       ...input,
       id,

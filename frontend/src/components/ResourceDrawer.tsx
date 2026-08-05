@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Braces, Copy, FileText, FolderOpen, Layers3, Logs, Scale, TerminalSquare, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { stringify } from 'yaml';
+import { copyText } from '../browser-compat';
 import { useData } from '../data-context';
 import { motionDuration, useEscapeLayer } from '../hooks/useEscapeLayer';
 import type { ResourceDescriptor, ResourceRow } from '../types';
@@ -178,6 +179,14 @@ export function ResourceDrawer({
     setUnsavedOpen(false);
     beginClose();
   };
+  const copyYaml = async () => {
+    try {
+      await copyText(yaml);
+      pushToast('YAML 已复制');
+    } catch {
+      pushToast('浏览器未允许复制，请手动选中 YAML', 'error');
+    }
+  };
 
   return (
     <>
@@ -193,7 +202,7 @@ export function ResourceDrawer({
           {row.kind === 'Pod' && row.namespace && <Button variant="secondary" aria-label="在窗口中打开终端" icon={<TerminalSquare size={16} />} onClick={() => openWindow({ type: 'shell', clusterId, clusterName: clusters.find((item) => item.id === clusterId)?.name, namespace: row.namespace!, resourceName: row.name, resourceUid: row.uid, container: podContainer })}>终端</Button>}
           {row.kind === 'Pod' && row.namespace && <Button variant="secondary" aria-label="在窗口中打开文件" icon={<FolderOpen size={16} />} onClick={() => openWindow({ type: 'files', clusterId, clusterName: clusters.find((item) => item.id === clusterId)?.name, namespace: row.namespace!, resourceName: row.name, resourceUid: row.uid, container: podContainer })}>文件</Button>}
           {row.kind === 'Deployment' && <Button variant="secondary" aria-label="扩缩容" icon={<Scale size={16} />} onClick={() => { setReplicas(savedReplicas); setScaleOpen(true); }}>扩缩容</Button>}
-          <Button variant="secondary" aria-label="复制 YAML" icon={<Copy size={16} />} onClick={() => { void navigator.clipboard.writeText(yaml); pushToast('YAML 已复制'); }}>复制</Button>
+          <Button variant="secondary" aria-label="复制 YAML" icon={<Copy size={16} />} onClick={() => void copyYaml()}>复制</Button>
           <Button variant="danger" aria-label="删除资源" icon={<Trash2 size={16} />} onClick={() => setDeleteOpen(true)}>删除</Button>
         </div>
         <div className="drawer-tabs" role="tablist">
