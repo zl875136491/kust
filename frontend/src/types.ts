@@ -86,6 +86,16 @@ export interface Overview {
   events: ResourceRow[];
 }
 
+export interface MetricsSummary {
+  available: boolean;
+  cpuMillicores: number;
+  memoryBytes: number;
+  nodes: number;
+  pods: number;
+  collectedAt: string;
+  message?: string;
+}
+
 export interface ResourceDescriptor {
   kind: string;
   label: string;

@@ -7,7 +7,7 @@ import type {
   ResourceRow,
   FileTreeResponse,
   AuthCapabilities, AuthState, PlatformSettings, PlatformSettingsUpdate, RegistrationProfile, ResourceMapResponse,
-  Role, SearchResult, User, UserSettings, AuditLog,
+  Role, SearchResult, User, UserSettings, AuditLog, MetricsSummary,
 } from './types';
 import { APP_BASE_PATH } from './runtime-config';
 import { MOCK_MODE } from './runtime-config';
@@ -113,6 +113,7 @@ export const api = {
   deleteCluster: (clusterId: string) =>
     request<void>(`/clusters/${clusterId}`, { method: 'DELETE' }),
   overview: (clusterId: string) => request<Overview>(`/clusters/${clusterId}/overview`),
+  metricsSummary: (clusterId: string) => request<MetricsSummary>(`/clusters/${clusterId}/metrics/summary`),
   resources: (clusterId: string, kind: string, namespace?: string) => {
     const query = namespace && namespace !== 'all' ? `?namespace=${encodeURIComponent(namespace)}` : '';
     return request<ResourceListResponse>(`/clusters/${clusterId}/resources/${kind}${query}`);

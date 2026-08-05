@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, fmt::Debug};
 
+use axum::http::Request;
 use k8s_openapi::api::{
     apps::v1::{DaemonSet, Deployment, ReplicaSet, StatefulSet},
     batch::v1::{CronJob, Job},
@@ -727,6 +728,112 @@ pub async fn list_resources(
         kind: display_kind.into(),
         items,
     })
+}
+
+pub async fn metrics_summary(
+    client: Client,
+) -> Result<crate::models::MetricsSummaryResponse, AppError> {
+    let collected_at = k8s_openapi::chrono::Utc::now().to_rfc3339();
+    let node_request = Request::get("/apis/metrics.k8s.io/v1beta1/nodes")
+        .body(Vec::new())
+        .map_err(|error| AppError::internal(format!("metrics request failed: {error}")))?;
+    let pod_request = Request::get("/apis/metrics.k8s.io/v1beta1/pods")
+        .body(Vec::new())
+        .map_err(|error| AppError::internal(format!("metrics request failed: {error}")))?;
+    let nodes: Value = client
+        .request(node_request)
+        .await
+        .map_err(|error| AppError::upstream(format!("Metrics API unavailable: {error}")))?;
+    let pods: Value = client
+        .request(pod_request)
+        .await
+        .map_err(|error| AppError::upstream(format!("Metrics API unavailable: {error}")))?;
+    let mut cpu_millicores = 0_i64;
+    let mut memory_bytes = 0_i64;
+    for item in nodes
+        .get("items")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .chain(
+            pods.get("items")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten(),
+        )
+    {
+        if let Some(containers) = item.get("usage").and_then(Value::as_object) {
+            cpu_millicores += parse_quantity(
+                containers
+                    .get("cpu")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
+                true,
+            );
+            memory_bytes += parse_quantity(
+                containers
+                    .get("memory")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
+                false,
+            );
+        }
+        if let Some(container_items) = item.get("containers").and_then(Value::as_array) {
+            for container in container_items {
+                if let Some(usage) = container.get("usage").and_then(Value::as_object) {
+                    cpu_millicores += parse_quantity(
+                        usage.get("cpu").and_then(Value::as_str).unwrap_or_default(),
+                        true,
+                    );
+                    memory_bytes += parse_quantity(
+                        usage
+                            .get("memory")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default(),
+                        false,
+                    );
+                }
+            }
+        }
+    }
+    Ok(crate::models::MetricsSummaryResponse {
+        available: true,
+        cpu_millicores,
+        memory_bytes,
+        nodes: nodes
+            .get("items")
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len),
+        pods: pods
+            .get("items")
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len),
+        collected_at,
+        message: None,
+    })
+}
+
+fn parse_quantity(value: &str, cpu: bool) -> i64 {
+    let value = value.trim();
+    if cpu {
+        if let Some(raw) = value.strip_suffix('n') {
+            return raw.parse::<f64>().unwrap_or(0.0) as i64 / 1_000_000;
+        }
+        if let Some(raw) = value.strip_suffix('m') {
+            return raw.parse::<f64>().unwrap_or(0.0) as i64;
+        }
+        return value.parse::<f64>().unwrap_or(0.0) as i64 * 1000;
+    }
+    let (number, multiplier) = if let Some(raw) = value.strip_suffix("Ki") {
+        (raw, 1024_f64)
+    } else if let Some(raw) = value.strip_suffix("Mi") {
+        (raw, 1024_f64.powi(2))
+    } else if let Some(raw) = value.strip_suffix("Gi") {
+        (raw, 1024_f64.powi(3))
+    } else {
+        (value, 1.0)
+    };
+    (number.parse::<f64>().unwrap_or(0.0) * multiplier) as i64
 }
 
 #[allow(dead_code)]
