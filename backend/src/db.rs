@@ -4,7 +4,11 @@ use mongodb::{
     Client, Database, IndexModel,
 };
 
-use crate::{config::AppConfig, error::AppError, models::PlatformSettingsDocument};
+use crate::{
+    config::AppConfig,
+    error::AppError,
+    models::{PlatformSettingsDocument, USER_SETTINGS_VISUAL_EFFECTS_VERSION},
+};
 
 pub async fn connect(config: &AppConfig) -> Result<Database, AppError> {
     let mut options = ClientOptions::parse(&config.mongodb_uri).await?;
@@ -16,6 +20,7 @@ pub async fn connect(config: &AppConfig) -> Result<Database, AppError> {
     database.run_command(doc! { "ping": 1 }).await?;
     create_indexes(&database).await?;
     seed_roles(&database).await?;
+    migrate_user_settings(&database).await?;
     Ok(database)
 }
 
@@ -85,6 +90,24 @@ async fn create_indexes(database: &Database) -> Result<(), AppError> {
     ttl(database, "sessions", "expires_at").await?;
     ttl(database, "trusted_devices", "expires_at").await?;
     ttl(database, "auth_codes", "expires_at").await?;
+    Ok(())
+}
+
+async fn migrate_user_settings(database: &Database) -> Result<(), AppError> {
+    database
+        .collection::<mongodb::bson::Document>("user_settings")
+        .update_many(
+            doc! { "visual_effects_version": { "$ne": USER_SETTINGS_VISUAL_EFFECTS_VERSION } },
+            doc! { "$set": {
+                "pointer_highlight": false,
+                "refraction": false,
+                "backdrop_blur": true,
+                "hover_motion": true,
+                "visual_effects_version": USER_SETTINGS_VISUAL_EFFECTS_VERSION,
+                "updated_at": mongodb::bson::DateTime::now(),
+            } },
+        )
+        .await?;
     Ok(())
 }
 

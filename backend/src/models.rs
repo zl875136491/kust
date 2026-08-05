@@ -488,8 +488,12 @@ pub struct UserSettingsDocument {
     pub page_size: i32,
     #[serde(default = "default_window_close_confirmation")]
     pub window_close_confirmation: bool,
+    #[serde(default)]
+    pub visual_effects_version: i32,
     pub updated_at: DateTime,
 }
+
+pub const USER_SETTINGS_VISUAL_EFFECTS_VERSION: i32 = 1;
 
 fn default_window_close_confirmation() -> bool {
     true
@@ -501,13 +505,14 @@ impl UserSettingsDocument {
             id: ObjectId::new(),
             user_id,
             theme: "system".into(),
-            pointer_highlight: true,
-            refraction: true,
+            pointer_highlight: false,
+            refraction: false,
             backdrop_blur: true,
             hover_motion: true,
             auto_refresh: true,
             page_size: 25,
             window_close_confirmation: true,
+            visual_effects_version: USER_SETTINGS_VISUAL_EFFECTS_VERSION,
             updated_at: DateTime::now(),
         }
     }
@@ -675,4 +680,24 @@ pub struct ResourceMapResponse {
     pub nodes: Vec<ResourceMapNode>,
     pub edges: Vec<ResourceMapEdge>,
     pub synced_at: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{UserSettingsDocument, USER_SETTINGS_VISUAL_EFFECTS_VERSION};
+    use mongodb::bson::oid::ObjectId;
+
+    #[test]
+    fn new_user_settings_use_performance_safe_visual_defaults() {
+        let settings = UserSettingsDocument::new(ObjectId::new());
+
+        assert!(!settings.pointer_highlight);
+        assert!(!settings.refraction);
+        assert!(settings.backdrop_blur);
+        assert!(settings.hover_motion);
+        assert_eq!(
+            settings.visual_effects_version,
+            USER_SETTINGS_VISUAL_EFFECTS_VERSION
+        );
+    }
 }
