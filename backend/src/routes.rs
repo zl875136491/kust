@@ -485,7 +485,7 @@ async fn cluster_overview(
     headers: HeaderMap,
     Path(cluster_id): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
-    auth::authenticate(&state, &headers, "authenticated").await?;
+    require_cluster_access(&state, &headers, &cluster_id).await?;
     Ok(Json(cache::overview(&state, &cluster_id).await?))
 }
 
@@ -494,7 +494,7 @@ async fn metrics_summary(
     headers: HeaderMap,
     Path(cluster_id): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
-    auth::authenticate(&state, &headers, "authenticated").await?;
+    require_cluster_access(&state, &headers, &cluster_id).await?;
     let client = state.kube_client(&cluster_id).await?;
     Ok(Json(kubernetes::metrics_summary(client).await?))
 }
@@ -504,7 +504,7 @@ async fn discovery(
     headers: HeaderMap,
     Path(cluster_id): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
-    auth::authenticate(&state, &headers, "authenticated").await?;
+    require_cluster_access(&state, &headers, &cluster_id).await?;
     Ok(Json(
         kubernetes::discover_resources(state.kube_client(&cluster_id).await?).await?,
     ))
@@ -516,7 +516,7 @@ async fn list_resources(
     Path((cluster_id, kind)): Path<(String, String)>,
     Query(query): Query<ResourceQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    auth::authenticate(&state, &headers, "authenticated").await?;
+    require_cluster_access(&state, &headers, &cluster_id).await?;
     Ok(Json(
         cache::list_resources(
             &state,
@@ -547,7 +547,7 @@ async fn get_resource(
     headers: HeaderMap,
     Path((cluster_id, kind, namespace, name)): Path<(String, String, String, String)>,
 ) -> Result<impl IntoResponse, AppError> {
-    auth::authenticate(&state, &headers, "authenticated").await?;
+    require_cluster_access(&state, &headers, &cluster_id).await?;
     let client = state.kube_client(&cluster_id).await?;
     let namespace = (namespace != "_").then_some(namespace.as_str());
     let yaml = kubernetes::resource_yaml(client, &kind, namespace, &name).await?;
@@ -601,7 +601,7 @@ async fn pod_logs(
     Path((cluster_id, namespace, name)): Path<(String, String, String)>,
     Query(query): Query<LogsQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    auth::authenticate(&state, &headers, "authenticated").await?;
+    require_cluster_access(&state, &headers, &cluster_id).await?;
     let client = state.kube_client(&cluster_id).await?;
     let logs = kubernetes::pod_logs(
         client,
@@ -619,7 +619,7 @@ async fn pod_containers(
     headers: HeaderMap,
     Path((cluster_id, namespace, name)): Path<(String, String, String)>,
 ) -> Result<impl IntoResponse, AppError> {
-    auth::authenticate(&state, &headers, "authenticated").await?;
+    require_cluster_access(&state, &headers, &cluster_id).await?;
     let client = state.kube_client(&cluster_id).await?;
     Ok(Json(
         kubernetes::pod_containers(client, &namespace, &name).await?,
@@ -649,7 +649,7 @@ async fn file_tree(
     Path((cluster_id, namespace, name)): Path<(String, String, String)>,
     Query(query): Query<crate::models::FileQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    auth::authenticate(&state, &headers, "authenticated").await?;
+    require_cluster_access(&state, &headers, &cluster_id).await?;
     let client = state.kube_client(&cluster_id).await?;
     Ok(Json(
         kubernetes::pod_file_tree(client, &namespace, &name, &query.path, query.container).await?,
@@ -662,7 +662,7 @@ async fn read_file(
     Path((cluster_id, namespace, name)): Path<(String, String, String)>,
     Query(query): Query<crate::models::FileQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    auth::authenticate(&state, &headers, "authenticated").await?;
+    require_cluster_access(&state, &headers, &cluster_id).await?;
     let client = state.kube_client(&cluster_id).await?;
     Ok(Json(
         kubernetes::pod_read_file(client, &namespace, &name, &query.path, query.container).await?,
@@ -723,6 +723,14 @@ async fn shell(
     upgrade: WebSocketUpgrade,
 ) -> Result<impl IntoResponse, AppError> {
     let actor = auth::authenticate_token(&state, &query.access_token, "authenticated").await?;
+    let cluster = state.cluster(&cluster_id).await?;
+    if !actor.user.is_admin()
+        && cluster.source != "preset"
+        && cluster.owner_user_id != Some(actor.user.id)
+        && !cluster.member_user_ids.contains(&actor.user.id)
+    {
+        return Err(AppError::forbidden("cluster access is not allowed"));
+    }
     if !actor
         .user
         .roles
@@ -802,6 +810,23 @@ async fn require_resource_write(
         .any(|role| matches!(role.as_str(), "admin" | "operator"))
     {
         return Err(AppError::forbidden("resource write permission is required"));
+    }
+    Ok(actor)
+}
+
+async fn require_cluster_access(
+    state: &SharedState,
+    headers: &HeaderMap,
+    cluster_id: &str,
+) -> Result<auth::AuthenticatedUser, AppError> {
+    let actor = auth::authenticate(state, headers, "authenticated").await?;
+    let cluster = state.cluster(cluster_id).await?;
+    if !actor.user.is_admin()
+        && cluster.source != "preset"
+        && cluster.owner_user_id != Some(actor.user.id)
+        && !cluster.member_user_ids.contains(&actor.user.id)
+    {
+        return Err(AppError::forbidden("cluster access is not allowed"));
     }
     Ok(actor)
 }

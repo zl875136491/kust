@@ -97,7 +97,7 @@ export function SystemSettingsPage() {
       setUsers(userList);
       setRoles(roleList);
       setDatabaseConnected(health.database === 'connected');
-      setAuditLogs(logs);
+      setAuditLogs(logs || []);
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : '系统设置加载失败';
       setLoadError(message);
