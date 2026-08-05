@@ -7,7 +7,7 @@ import type {
   ResourceRow,
   FileTreeResponse,
   AuthCapabilities, AuthState, PlatformSettings, PlatformSettingsUpdate, RegistrationProfile, ResourceMapResponse,
-  Role, SearchResult, User, UserSettings,
+  Role, SearchResult, User, UserSettings, AuditLog,
 } from './types';
 import { APP_BASE_PATH } from './runtime-config';
 import { MOCK_MODE } from './runtime-config';
@@ -101,6 +101,7 @@ export const api = {
   updateRoles: (id: string, roles: string[]) => request<User>(`/admin/users/${id}/roles`, { method: 'PATCH', body: JSON.stringify({ roles }) }),
   updateUserStatus: (id: string, disabled: boolean) => request<User>(`/admin/users/${id}/status`, { method: 'PATCH', body: JSON.stringify({ disabled }) }),
   adminResetCode: (id: string) => request<{ username: string; code: string; expiresInMinutes: number }>(`/admin/users/${id}/reset-code`, { method: 'POST' }),
+  auditLogs: (limit = 100) => request<AuditLog[]>(`/admin/audit-logs?limit=${limit}`),
   changePassword: (currentPassword: string, newPassword: string) => request<void>('/auth/password/change', { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) }),
   search: (q: string, clusterId?: string) => { const params = new URLSearchParams({ q }); if (clusterId) params.set('clusterId', clusterId); return request<SearchResult[]>(`/search?${params}`); },
   resourceMap: (clusterId: string) => request<ResourceMapResponse>(`/clusters/${clusterId}/map`),

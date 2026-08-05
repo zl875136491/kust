@@ -21,9 +21,9 @@ import { useAuth } from '../auth-context';
 import { copyText } from '../browser-compat';
 import { Button, EmptyState, Modal, SelectMenu, useToast } from '../components/ui';
 import { useData } from '../data-context';
-import type { PlatformSettings, PlatformSettingsUpdate, Role, User } from '../types';
+import type { AuditLog, PlatformSettings, PlatformSettingsUpdate, Role, User } from '../types';
 
-type SystemView = 'general' | 'users' | 'roles';
+type SystemView = 'general' | 'users' | 'roles' | 'audit';
 
 interface ResetCode {
   username: string;
@@ -62,6 +62,7 @@ export function SystemSettingsPage() {
   const [draft, setDraft] = useState<PlatformSettings>();
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [databaseConnected, setDatabaseConnected] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -77,23 +78,26 @@ export function SystemSettingsPage() {
     { value: 'general', label: '平台', description: '访问、缓存与运行状态', icon: <Server size={18} /> },
     { value: 'users', label: '用户', description: '账号状态与安全管理', icon: <Users size={18} /> },
     { value: 'roles', label: '角色', description: '权限与成员概览', icon: <ShieldCheck size={18} /> },
+    { value: 'audit', label: '审计', description: '管理员操作记录', icon: <Activity size={18} /> },
   ];
 
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError('');
     try {
-      const [platform, userList, roleList, health] = await Promise.all([
+      const [platform, userList, roleList, health, logs] = await Promise.all([
         api.platformSettings(),
         api.users(),
         api.roles(),
         api.health(),
+        api.auditLogs(),
       ]);
       setSettings(platform);
       setDraft(platform);
       setUsers(userList);
       setRoles(roleList);
       setDatabaseConnected(health.database === 'connected');
+      setAuditLogs(logs);
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : '系统设置加载失败';
       setLoadError(message);
@@ -311,6 +315,15 @@ export function SystemSettingsPage() {
                     <div className="role-list-permissions">{role.permissions.map((permission) => <span key={permission}>{permissionLabels[permission] || permission}</span>)}</div>
                   </div>
                 ))}
+              </div>
+            </section>
+          )}
+
+          {view === 'audit' && (
+            <section id="system-settings-panel-audit" aria-labelledby="system-settings-nav-audit" className="settings-section settings-panel glass-card">
+              <header><Activity size={19} /><div><h3>审计日志</h3><p>记录平台关键操作，便于追踪和合规检查</p></div><Button variant="ghost" icon={<RefreshCw size={15} />} onClick={() => void load()}>刷新</Button></header>
+              <div className="audit-list">
+                {auditLogs.length === 0 ? <EmptyState icon={<Activity size={22} />} title="暂无审计记录" /> : auditLogs.map((log) => <div className="audit-row" key={log.id}><div><strong>{log.action}</strong><span>{log.target || '系统操作'}</span></div><time>{new Date(log.createdAt).toLocaleString('zh-CN')}</time></div>)}
               </div>
             </section>
           )}

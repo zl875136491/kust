@@ -207,6 +207,18 @@ pub struct OverviewResponse {
     pub events: Vec<ResourceRow>,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetricsSummaryResponse {
+    pub available: bool,
+    pub cpu_millicores: i64,
+    pub memory_bytes: i64,
+    pub nodes: usize,
+    pub pods: usize,
+    pub collected_at: String,
+    pub message: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatusCount {

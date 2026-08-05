@@ -16,6 +16,17 @@ export interface Cluster {
   preset?: boolean;
   readOnly: boolean;
   source: 'preset' | 'user' | string;
+  memberCount?: number;
+}
+
+export interface AuditLog {
+  id: string;
+  actorUserId?: string;
+  action: string;
+  target?: string;
+  clusterId?: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
 }
 
 export interface CreateClusterPayload {
