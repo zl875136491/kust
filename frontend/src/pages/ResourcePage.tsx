@@ -1,5 +1,7 @@
 import {
   CirclePlus,
+  ChevronLeft,
+  ChevronRight,
   ListChecks,
   RefreshCw,
   RotateCw,
@@ -27,6 +29,7 @@ import {
 } from '../resource-utils';
 import type { ResourceRow } from '../types';
 import { useWorkspaceWindows } from '../workspace-windows-context';
+import { usePreferences } from '../preferences-context';
 
 type ConfirmedAction = 'delete' | 'restart' | 'scale';
 
@@ -66,6 +69,7 @@ export function ResourcePage() {
   const { pushToast } = useToast();
   const { user } = useAuth();
   const { openWindow, setWindowStatus, windows } = useWorkspaceWindows();
+  const { settings: preferences } = usePreferences();
   const canWriteResources = Boolean(user?.roles.some((role) => role === 'admin' || role === 'operator'));
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
@@ -78,10 +82,12 @@ export function ResourcePage() {
   const [savedReplicas, setSavedReplicas] = useState(1);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [page, setPage] = useState(1);
   const query = useQuery({
     queryKey: ['resources', clusterId, kind, namespace],
     queryFn: () => getResources(clusterId, kind, descriptor?.namespaced ? namespace : undefined),
     enabled: Boolean(clusterId && descriptor),
+    refetchInterval: preferences?.autoRefresh ? 60_000 : false,
   });
 
   useEffect(() => {
@@ -104,6 +110,10 @@ export function ResourcePage() {
     const matchesSearch = !queryText || `${row.name} ${row.namespace || ''} ${Object.entries(row.labels).flat().join(' ')}`.toLowerCase().includes(queryText);
     return matchesSearch && (status === 'all' || row.status === status);
   }), [rows, search, status]);
+  const pageSize = preferences?.pageSize || 25;
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const visibleRows = filtered.slice((page - 1) * pageSize, page * pageSize);
+  useEffect(() => setPage(1), [kind, namespace, search, status]);
 
   const invalidateResources = useCallback(() => Promise.all([
     queryClient.invalidateQueries({ queryKey: ['resources', clusterId] }),
@@ -239,7 +249,7 @@ export function ResourcePage() {
         </div>
         {query.error
           ? <EmptyState icon={<ServerCrash size={24} />} title="无法读取资源" body={query.error instanceof Error ? query.error.message : undefined} action={<Button onClick={() => void query.refetch()}>重试</Button>} />
-          : <ResourceTable rows={filtered} loading={query.isLoading} selectionMode={selectionMode} selected={selected} onSelected={setSelected} onOpen={(row) => openRootDrawer(row)} canWriteResources={canWriteResources} onAction={(action, row) => void handleResourceAction(action, row)} />}
+          : <><ResourceTable rows={visibleRows} loading={query.isLoading} selectionMode={selectionMode} selected={selected} onSelected={setSelected} onOpen={(row) => openRootDrawer(row)} canWriteResources={canWriteResources} onAction={(action, row) => void handleResourceAction(action, row)} /><div className="resource-pagination"><span>显示 {(page - 1) * pageSize + (visibleRows.length ? 1 : 0)}-{Math.min(page * pageSize, filtered.length)} / {filtered.length}</span><div><IconButton label="上一页" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={page <= 1}><ChevronLeft size={16} /></IconButton><span>{page} / {pageCount}</span><IconButton label="下一页" onClick={() => setPage((value) => Math.min(pageCount, value + 1))} disabled={page >= pageCount}><ChevronRight size={16} /></IconButton></div></div></>}
       </section>
       <ResourceDrawer
         clusterId={clusterId}
