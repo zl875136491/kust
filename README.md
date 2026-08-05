@@ -337,15 +337,20 @@ npm run dev
 | `GET/PUT` | `/api/settings` | 个人设置 |
 | `GET/PUT` | `/api/admin/settings` | 平台设置 |
 | `GET` | `/api/admin/users`、`/api/admin/roles` | 用户和角色 |
+| `GET` | `/api/admin/audit-logs` | 管理员审计日志 |
 | `PATCH` | `/api/admin/users/{id}/roles`、`/api/admin/users/{id}/status` | 角色与账号状态管理 |
 | `POST` | `/api/admin/users/{id}/reset-code` | 为本地账号生成重置码 |
 | `GET/POST` | `/api/clusters` | 集群列表与添加 |
 | `PATCH/DELETE` | `/api/clusters/{id}` | 编辑或移除集群配置 |
+| `GET/PUT` | `/api/clusters/{id}/members` | 集群成员 ACL（管理员） |
 | `GET` | `/api/clusters/{id}/overview` | 集群概览 |
+| `GET` | `/api/clusters/{id}/metrics/summary` | Metrics API 汇总 |
+| `GET` | `/api/clusters/{id}/discovery` | Kubernetes Discovery 资源元数据 |
 | `GET` | `/api/clusters/{id}/resources/{kind}` | 资源快照列表 |
 | `GET/DELETE` | `/api/clusters/{id}/resources/{kind}/{namespace}/{name}` | 实时 YAML 或删除资源 |
 | `PATCH` | `/api/clusters/{id}/deployments/{namespace}/{name}/scale` | Deployment 扩缩容 |
 | `GET` | `/api/clusters/{id}/pods/{namespace}/{name}/logs` | Pod 日志 |
+| `GET` | `/api/clusters/{id}/pods/{namespace}/{name}/containers` | Pod 容器和 Init 容器 |
 | `GET` | `/api/clusters/{id}/pods/{namespace}/{name}/shell` | Pod WebSocket 终端 |
 | `GET/PUT/DELETE` | `/api/clusters/{id}/pods/{namespace}/{name}/file` | Pod 文件读写和删除 |
 | `GET` | `/api/clusters/{id}/pods/{namespace}/{name}/files` | Pod 目录浏览 |
@@ -354,6 +359,9 @@ npm run dev
 | `GET` | `/api/search` | 跨集群资源搜索 |
 | `GET` | `/api/clusters/{id}/map` | 缓存资源关系地图 |
 | `POST` | `/api/clusters/{id}/sync` | 手动同步全部支持资源 |
+| `GET` | `/api/notifications` | 当前用户通知列表 |
+| `PATCH` | `/api/notifications/{id}/read` | 标记通知已读 |
+| `POST` | `/api/notifications/read-all` | 全部标记已读 |
 
 ## 验证
 
@@ -420,20 +428,20 @@ Jenkins 需要 Harbor 用户名密码凭据 `infra_harbor_auth`，以及 Secret 
 - admin/operator 的写能力仍受 kubeconfig 对应 Kubernetes RBAC 限制。
 - Pod 文件功能能够修改和递归删除容器内文件，只应开放给受信任的运维角色。
 - `KUST_EXPOSE_LOCAL_RESET_CODES` 只能用于本地开发，生产必须保持关闭。
-- 当前代码未实现用户级集群 ACL、审计日志、API rate limiting 或细粒度自定义角色执行引擎，部署时应由网关、网络和组织流程补足控制。
+- 集群成员 ACL 和审计日志已在应用层生效；API rate limiting、细粒度自定义角色执行引擎仍建议由网关和后续权限模块补足。
 
 ## 当前边界
 
 ### 产品与交互
 
 - **项目页是展示分组**：当前用固定名称和前三个集群拼装，不存在项目后端模型、创建、编辑或成员管理。
-- **通知不是持久化通知中心**：它读取一个集群的 Event，已读状态只存在组件内存；离开页面或刷新后会丢失，顶部红点也不是实时未读数。
-- **CPU/内存指标未接入**：后端当前始终返回空值，概览页会显示“Metrics API 未启用”。
-- **部分个人设置尚未消费**：主题、视觉效果和窗口关闭确认已生效；`autoRefresh` 与 `pageSize` 虽能保存，但资源页尚未使用它们控制刷新或分页。
+- **通知中心**：通知已提供 MongoDB 持久化读状态和已读接口；Kubernetes Event 仍按缓存同步周期汇聚，实时推送可在后续接入 SSE/WebSocket。
+- **CPU/内存指标**：概览页通过 Kubernetes Metrics API 读取 Node/Pod 使用量；集群未安装 metrics-server 或权限不足时显示不可用。
+- **个人设置消费**：`autoRefresh` 控制资源列表刷新，`pageSize` 控制浏览器分页。
 - **权限 UI 尚未完全收口**：部分详情抽屉和 Pod 工具仍会向 viewer 展示写操作或终端入口，后端会返回 403，但界面会产生“看得到、做不了”的体验。
 - **工作负载表不含 Pod**：统计卡包含 Pod，当前聚合表从第二个资源组开始展开，因此不会列出 Pod。
 - **移动端上下文切换受限**：760px 以下顶栏隐藏集群/命名空间选择器，侧栏没有等价的命名空间入口。
-- **文件工具不是完整文件传输器**：当前没有上传、下载文件或显式新建文件入口，也没有 Pod 容器选择器；默认使用资源详情中的第一个容器。
+- **文件工具边界**：当前提供容器元数据接口、目录创建、读写和删除；上传/下载进度和二进制文件传输仍待补强。
 
 ### 架构与规模
 
