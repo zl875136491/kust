@@ -44,18 +44,13 @@ LABEL org.opencontainers.image.authors="NC_SIT_ZHANGLE" \
       org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.component="backend"
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl \
-    && rm -rf /var/lib/apt/lists/*
 RUN useradd --create-home --uid 10001 kust
+COPY --from=rust-toolchain /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /app/target/release/kust-api /usr/local/bin/kust-api
 
 ENV LISTEN_ADDR=0.0.0.0:8080
 
 USER 10001:10001
 EXPOSE 8080
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl --fail --silent --show-error http://127.0.0.1:8080/api/health >/dev/null || exit 1
 
 ENTRYPOINT ["kust-api"]
