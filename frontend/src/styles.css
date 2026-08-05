@@ -530,15 +530,27 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 0; accent-color: var
 .command-results button:hover { background: var(--accent-soft); }
 .command-results small { color: var(--text-muted); font-size: 9px; }
 
-.settings-layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(280px, 1fr); gap: 12px; align-items: start; }
+.settings-workspace { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 12px; align-items: start; }
+.settings-sidebar.glass-card { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 3px; padding: 6px; overflow: hidden; }
+.settings-sidebar button { display: grid; grid-template-columns: 20px minmax(0, 1fr) 16px; align-items: center; gap: 9px; width: 100%; min-height: 58px; padding: 8px 9px; color: var(--text-secondary); background: transparent; border: 1px solid transparent; border-radius: 7px; cursor: pointer; text-align: left; transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease; }
+.settings-sidebar button:hover { color: var(--text); background: var(--surface-hover); }
+.settings-sidebar button:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 65%, transparent); outline-offset: -2px; }
+.settings-sidebar button.is-active { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 26%, var(--border)); box-shadow: inset 0 1px 0 var(--glass-specular-soft); }
+.settings-sidebar button > svg { justify-self: center; }
+.settings-sidebar button > svg:last-child { color: var(--text-muted); }
+.settings-sidebar button.is-active > svg:last-child { color: var(--accent); }
+.settings-sidebar__copy { display: grid; min-width: 0; gap: 2px; }
+.settings-sidebar__copy strong, .settings-sidebar__copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-sidebar__copy strong { color: inherit; font-size: 11px; }
+.settings-sidebar__copy small { color: var(--text-muted); font-size: 9px; }
+.settings-content { min-width: 0; }
 .settings-section { overflow: hidden; }
-.settings-section--appearance { grid-column: 1; grid-row: 1; }
-.settings-section--effects { grid-column: 1; grid-row: 2; }
-.settings-section--resources { grid-column: 2; grid-row: 1; }
-.settings-section--security { grid-column: 1 / -1; }
-.settings-section--users { grid-column: 1 / -1; }
+.settings-panel { min-height: 330px; animation: settings-panel-in 220ms cubic-bezier(.16, 1, .3, 1); }
+@keyframes settings-panel-in { from { transform: translateX(8px); opacity: 0; } }
 .settings-section > header { display: flex; align-items: center; gap: 9px; min-height: 51px; padding: 10px 13px; color: var(--accent); border-bottom: 1px solid var(--border); }
+.settings-section > header > div { display: grid; gap: 2px; }
 .settings-section > header h3 { color: var(--text); font-size: 13px; }
+.settings-section > header p { margin: 0; color: var(--text-muted); font-size: 9px; }
 
 .system-settings-tabs { margin-bottom: 12px; }
 .system-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
@@ -665,6 +677,7 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 0; accent-color: var
 .setting-row > div:first-child { display: flex; flex-direction: column; gap: 3px; }
 .setting-row strong { font-size: 11px; }
 .setting-row span { color: var(--text-muted); font-size: 9px; }
+.setting-row .setting-note--experimental { margin-top: 2px; color: color-mix(in srgb, var(--warning) 78%, var(--text-muted)); }
 .number-input { width: 80px; }
 
 .notification-list { overflow: hidden; }
@@ -1094,11 +1107,7 @@ kbd,
   .compact-select select { min-width: 100px; }
   .namespace-select select { min-width: 120px; }
   .circular-stat { min-height: 106px; }
-  .settings-layout { grid-template-columns: 1fr; }
-  .settings-section--appearance,
-  .settings-section--effects,
-  .settings-section--resources { grid-column: 1; grid-row: auto; }
-  .settings-section--security, .settings-section--users { grid-column: 1; grid-row: auto; }
+  .settings-workspace { grid-template-columns: 190px minmax(0, 1fr); }
   .user-row { grid-template-columns: 32px minmax(100px, 1fr); }
   .user-row .select-menu, .user-row > .button { grid-column: 2; }
   .totp-setup { grid-template-columns: 1fr; }
@@ -1154,6 +1163,11 @@ kbd,
   .modal--resource-editor .yaml-editor textarea { min-height: 0; }
   .theme-options { grid-template-columns: 1fr; }
   .theme-options button { min-height: 48px; }
+  .settings-workspace { grid-template-columns: minmax(0, 1fr); }
+  .settings-sidebar.glass-card { position: relative; top: auto; flex-direction: row; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+  .settings-sidebar::-webkit-scrollbar { display: none; }
+  .settings-sidebar button { min-width: 160px; flex: 0 0 160px; }
+  .settings-panel { min-height: 0; }
   .system-settings-grid, .role-admin-grid { grid-template-columns: 1fr; }
   .admin-list__toolbar { align-items: stretch; flex-direction: column; }
   .admin-user-search { width: 100%; }
@@ -1178,6 +1192,8 @@ kbd,
   .system-stat { grid-template-columns: 32px minmax(0, 1fr); min-height: 66px; padding: 8px; }
   .system-stat > span { width: 32px; height: 32px; }
   .system-setting-select { width: 150px; }
+  .settings-sidebar button { grid-template-columns: 18px minmax(0, 1fr); min-width: 118px; flex-basis: 118px; min-height: 46px; }
+  .settings-sidebar button > svg:last-child, .settings-sidebar__copy small { display: none; }
   .admin-user-row { grid-template-columns: minmax(0, 1fr); }
   .admin-user-identity, .admin-user-meta, .admin-user-row > .select-menu, .admin-user-actions { grid-column: 1; }
   .admin-user-meta, .admin-user-actions { justify-content: flex-start; }

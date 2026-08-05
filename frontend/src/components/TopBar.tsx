@@ -19,7 +19,7 @@ const roleLabels: Record<string, string> = {
 function getPageTitle(pathname: string, cluster?: Cluster) {
   if (pathname === '/') return '首页';
   if (pathname === '/notifications') return '通知';
-  if (pathname === '/settings') return '设置';
+  if (pathname === '/settings') return '个人设置';
   const resourceKind = pathname.match(/\/resources\/([^/]+)/)?.[1];
   if (resourceKind) return resourceDescriptors[resourceKind]?.label || resourceKind;
   if (pathname.endsWith('/shell')) return 'WebShell';

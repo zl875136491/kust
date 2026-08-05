@@ -179,8 +179,8 @@ export function Sidebar({
           <NavLink to="/notifications" className="nav-item" onClick={closeOnMobile} title={!expandedView ? '通知' : undefined}>
             <Bell size={18} /><span>通知</span>
           </NavLink>
-          <NavLink to="/settings" className="nav-item" onClick={closeOnMobile} title={!expandedView ? '设置' : undefined}>
-            <Settings size={18} /><span>设置</span>
+          <NavLink to="/settings" className="nav-item" onClick={closeOnMobile} title={!expandedView ? '个人设置' : undefined}>
+            <Settings size={18} /><span>个人设置</span>
           </NavLink>
           {isAdmin && (
             <NavLink to="/system-settings" className="nav-item" onClick={closeOnMobile} title={!expandedView ? '系统设置' : undefined}>
