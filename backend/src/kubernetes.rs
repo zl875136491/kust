@@ -1137,6 +1137,31 @@ pub async fn pod_logs(
         .await?)
 }
 
+pub async fn pod_containers(
+    client: Client,
+    namespace: &str,
+    pod: &str,
+) -> Result<crate::models::PodContainersResponse, AppError> {
+    let api: Api<Pod> = Api::namespaced(client, namespace);
+    let pod = api.get(pod).await?;
+    let spec = pod.spec.as_ref();
+    Ok(crate::models::PodContainersResponse {
+        containers: spec
+            .map(|value| {
+                value
+                    .containers
+                    .iter()
+                    .map(|item| item.name.clone())
+                    .collect()
+            })
+            .unwrap_or_default(),
+        init_containers: spec
+            .and_then(|value| value.init_containers.as_ref())
+            .map(|items| items.iter().map(|item| item.name.clone()).collect())
+            .unwrap_or_default(),
+    })
+}
+
 fn container_params(container: Option<String>, tty: bool) -> AttachParams {
     let params = if tty {
         AttachParams::interactive_tty()

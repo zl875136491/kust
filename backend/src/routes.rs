@@ -152,6 +152,10 @@ pub fn router(state: SharedState, config: &AppConfig) -> Result<Router, AppError
             get(pod_logs),
         )
         .route(
+            "/api/clusters/{cluster_id}/pods/{namespace}/{name}/containers",
+            get(pod_containers),
+        )
+        .route(
             "/api/clusters/{cluster_id}/pods/{namespace}/{name}/files",
             get(file_tree),
         )
@@ -587,6 +591,18 @@ async fn pod_logs(
     )
     .await?;
     Ok(Json(LogsResponse { logs }))
+}
+
+async fn pod_containers(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path((cluster_id, namespace, name)): Path<(String, String, String)>,
+) -> Result<impl IntoResponse, AppError> {
+    auth::authenticate(&state, &headers, "authenticated").await?;
+    let client = state.kube_client(&cluster_id).await?;
+    Ok(Json(
+        kubernetes::pod_containers(client, &namespace, &name).await?,
+    ))
 }
 
 async fn apply_yaml(

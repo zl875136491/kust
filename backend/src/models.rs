@@ -331,6 +331,13 @@ pub struct ShellQuery {
     pub access_token: String,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PodContainersResponse {
+    pub containers: Vec<String>,
+    pub init_containers: Vec<String>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ResourceSnapshotDocument {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]

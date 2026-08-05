@@ -118,6 +118,11 @@ export interface FileTreeResponse {
   entries: FileEntry[];
 }
 
+export interface PodContainersResponse {
+  containers: string[];
+  initContainers: string[];
+}
+
 export interface User {
   id: string;
   username: string;

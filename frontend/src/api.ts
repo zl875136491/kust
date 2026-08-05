@@ -7,7 +7,7 @@ import type {
   ResourceRow,
   FileTreeResponse,
   AuthCapabilities, AuthState, PlatformSettings, PlatformSettingsUpdate, RegistrationProfile, ResourceMapResponse,
-  Role, SearchResult, User, UserSettings, AuditLog, MetricsSummary,
+  Role, SearchResult, User, UserSettings, AuditLog, MetricsSummary, PodContainersResponse,
 } from './types';
 import { APP_BASE_PATH } from './runtime-config';
 import { MOCK_MODE } from './runtime-config';
@@ -149,6 +149,7 @@ export const api = {
       `/clusters/${clusterId}/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/logs?${params}`,
     );
   },
+  podContainers: (clusterId: string, namespace: string, name: string) => request<PodContainersResponse>(`/clusters/${clusterId}/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/containers`),
   podExists: (clusterId: string, namespace: string, name: string) =>
     request<{ yaml: string }>(
       `/clusters/${clusterId}/resources/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`,
