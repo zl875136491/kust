@@ -131,7 +131,9 @@ server {
   location / { try_files $uri $uri/ /index.html; }
 }
 EOF
-    printf 'FROM nginx:1.27-alpine\nCOPY default.conf /etc/nginx/conf.d/default.conf\nCOPY . /usr/share/nginx/html\nEXPOSE 8080\n' > "${temp}/Dockerfile"
+    # The platform Deployment enforces runAsNonRoot. Use the upstream unprivileged
+    # Nginx image so every static application is compatible by construction.
+    printf 'FROM nginxinc/nginx-unprivileged:1.27-alpine\nCOPY default.conf /etc/nginx/conf.d/default.conf\nCOPY --chown=101:101 . /usr/share/nginx/html\nEXPOSE 8080\n' > "${temp}/Dockerfile"
     docker build --pull --provenance=false --build-arg HTTP_PROXY --build-arg HTTPS_PROXY --build-arg NO_PROXY --tag "${image}" "${temp}"
     ;;
   *) exit 2 ;;

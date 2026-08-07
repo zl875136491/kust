@@ -1319,44 +1319,83 @@ async fn build_callback(
                 "image must be an immutable digest from this application's Harbor repository",
             ));
         }
-        let client = state.kube_client(&app.cluster_id.to_hex()).await?;
-        if let Err(error) = kubernetes::apply_hosted_application(
-            client,
-            &app,
-            image,
-            state.config.app_image_pull_secret.as_deref(),
-        )
-        .await
-        {
-            build.status = "failed".into();
-            build.message = Some(format!(
-                "image was built but Kubernetes deployment failed: {error}"
-            ));
-            build.finished_at = Some(DateTime::now());
-            state
-                .application_builds
-                .replace_one(doc! {"_id": id}, &build)
+        // A callback travels through the public gateway, which has a shorter timeout
+        // than a Kubernetes rollout. Acknowledge the immutable image immediately and
+        // let the API own the longer apply/readiness operation in the background.
+        // This keeps a successful Jenkins build from being marked failed solely because
+        // the gateway closed a long-running callback response.
+        build.status = "running".into();
+        build.git_commit = request.git_commit.clone();
+        build.image_ref = request.image_ref.clone();
+        build.image_digest_ref = request.image_digest_ref.clone();
+        build.jenkins_build_url = request.jenkins_build_url.clone();
+        build.message =
+            Some("Image pushed; Kust is applying controlled Kubernetes resources".into());
+        build.callback_token_hash = None;
+        build.callback_token_expires_at = None;
+        build.started_at.get_or_insert_with(DateTime::now);
+        state
+            .application_builds
+            .replace_one(doc! {"_id": id}, &build)
+            .await?;
+
+        let deployment_state = state.clone();
+        let deployment_app = app.clone();
+        let deployment_image = image.to_string();
+        tokio::spawn(async move {
+            let result = async {
+                let client = deployment_state
+                    .kube_client(&deployment_app.cluster_id.to_hex())
+                    .await?;
+                kubernetes::apply_hosted_application(
+                    client,
+                    &deployment_app,
+                    &deployment_image,
+                    deployment_state.config.app_image_pull_secret.as_deref(),
+                )
                 .await?;
-            return Ok(Json(ApplicationBuildResponse::from(build)));
-        }
-        if let Err(error) = kubernetes::wait_for_hosted_application_ready(
-            state.kube_client(&app.cluster_id.to_hex()).await?,
-            &app,
-            std::time::Duration::from_secs(state.config.app_rollout_timeout_seconds),
-        )
-        .await
-        {
-            build.status = "failed".into();
-            build.message = Some(format!(
-                "Kubernetes resources were applied but did not become ready: {error}"
-            ));
-            build.finished_at = Some(DateTime::now());
-            state
+                kubernetes::wait_for_hosted_application_ready(
+                    deployment_state
+                        .kube_client(&deployment_app.cluster_id.to_hex())
+                        .await?,
+                    &deployment_app,
+                    std::time::Duration::from_secs(
+                        deployment_state.config.app_rollout_timeout_seconds,
+                    ),
+                )
+                .await
+            }
+            .await;
+
+            let (status, message) = match result {
+                Ok(()) => (
+                    "succeeded",
+                    "Deployment, Service and HTTPRoute are ready".to_string(),
+                ),
+                Err(error) => ("failed", format!("Kubernetes deployment failed: {error}")),
+            };
+            if let Err(error) = deployment_state
                 .application_builds
-                .replace_one(doc! {"_id": id}, &build)
-                .await?;
-            return Ok(Json(ApplicationBuildResponse::from(build)));
-        }
+                .update_one(
+                    doc! {"_id": id, "status": "running"},
+                    doc! {"$set": {"status": status, "message": message, "finished_at": DateTime::now()}},
+                )
+                .await
+            {
+                tracing::warn!(%error, build_id = %id.to_hex(), "unable to record hosted application rollout result");
+            }
+        });
+
+        write_audit(
+            &state,
+            None,
+            "hosting.deploy.callback",
+            Some(&build_id),
+            None,
+            json!({"status": "running"}),
+        )
+        .await?;
+        return Ok(Json(ApplicationBuildResponse::from(build)));
     }
     build.status = request.status.clone();
     build.git_commit = request.git_commit;

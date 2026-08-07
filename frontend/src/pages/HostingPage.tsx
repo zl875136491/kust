@@ -44,6 +44,11 @@ export function HostingPage() {
   // The initial load intentionally runs once; reload is also exposed through the toolbar.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { void reload(); }, []);
+  useEffect(() => {
+    if (!applications.some((application) => ['queued', 'running'].includes(application.latestBuild?.status || ''))) return;
+    const timer = window.setInterval(() => void reload(), 5000);
+    return () => window.clearInterval(timer);
+  }, [applications]);
 
   const deploy = async (application: HostedApplication) => {
     try { const build = await api.deployHostedApplication(application.id); setApplications((current) => current.map((item) => item.id === application.id ? { ...item, latestBuild: build } : item)); pushToast(`已触发 ${application.name} 的构建`); } catch (error) { pushToast(error instanceof Error ? error.message : '无法触发部署', 'error'); }
