@@ -866,8 +866,27 @@ async fn delete_application(
             "only the application owner can delete it",
         ));
     }
-    let client = state.kube_client(&app.cluster_id.to_hex()).await?;
-    kubernetes::delete_hosted_application(client, &app).await?;
+    // Resource discovery and Kubernetes finalizers can outlive the public gateway
+    // timeout. Remove the application from the platform immediately and clean up
+    // only its ownership-checked resources in the background.
+    let cleanup_state = state.clone();
+    let cleanup_app = app.clone();
+    tokio::spawn(async move {
+        let result = async {
+            let client = cleanup_state
+                .kube_client(&cleanup_app.cluster_id.to_hex())
+                .await?;
+            kubernetes::delete_hosted_application(client, &cleanup_app).await
+        }
+        .await;
+        if let Err(error) = result {
+            tracing::warn!(
+                %error,
+                application_id = %cleanup_app.id.to_hex(),
+                "unable to clean up hosted application Kubernetes resources"
+            );
+        }
+    });
     state
         .hosted_applications
         .delete_one(doc! {"_id":app.id})
