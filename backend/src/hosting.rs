@@ -256,6 +256,16 @@ fn validate_repository(value: &str) -> Result<String, AppError> {
         ));
     }
     let host = parsed.host_str().unwrap_or_default().trim_end_matches('.');
+    let path = parsed.path();
+    if path.is_empty()
+        || path == "/"
+        || path.contains("://")
+        || path
+            .chars()
+            .any(|character| character.is_whitespace() || character.is_control())
+    {
+        return Err(AppError::bad_request("repository URL path is invalid"));
+    }
     if host.eq_ignore_ascii_case("localhost")
         || host.eq_ignore_ascii_case("metadata.google.internal")
         || host.ends_with(".localhost")
@@ -1595,6 +1605,7 @@ mod tests {
         assert!(validate_repository("file:///tmp/service").is_err());
         assert!(validate_repository("https://127.0.0.1/team/service.git").is_err());
         assert!(validate_repository("https://gitlab.local/team/service.git").is_err());
+        assert!(validate_repository("https://github.com/linuxserver/docker-code-serverhttps://github.com/linuxserver/docker-code-server").is_err());
     }
 
     #[test]
