@@ -240,6 +240,108 @@ export interface SearchResult {
   status?: string;
 }
 
+export type HostingBuildMode = 'dockerfile' | 'buildpack' | 'static' | 'custom';
+
+export interface GitCredential {
+  id: string;
+  name: string;
+  credentialType: 'token' | 'ssh_key';
+  username?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApplicationBuild {
+  id: string;
+  applicationId: string;
+  gitCommit?: string;
+  gitRef: string;
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+  jenkinsBuildUrl?: string;
+  imageRef?: string;
+  imageDigestRef?: string;
+  message?: string;
+  createdAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+}
+
+export interface HostedApplication {
+  id: string;
+  ownerUserId: string;
+  name: string;
+  slug: string;
+  repositoryUrl: string;
+  gitRef: string;
+  credentialId?: string;
+  buildMode: HostingBuildMode;
+  sourceSubdirectory?: string;
+  buildCommand?: string;
+  outputDirectory?: string;
+  containerPort: number;
+  healthPath: string;
+  clusterId: string;
+  namespace: string;
+  replicas: number;
+  cpuRequest: string;
+  memoryRequest: string;
+  cpuLimit: string;
+  memoryLimit: string;
+  routeHost: string;
+  routePath: string;
+  gatewayName: string;
+  gatewayNamespace: string;
+  autoDeploy: boolean;
+  webhookConfigured: boolean;
+  createdAt: string;
+  updatedAt: string;
+  latestBuild?: ApplicationBuild;
+}
+
+export interface CreateGitCredentialPayload {
+  name: string;
+  credentialType: 'token' | 'ssh_key';
+  username?: string;
+  secret: string;
+}
+
+export interface CreateHostedApplicationPayload {
+  name: string;
+  repositoryUrl: string;
+  gitRef: string;
+  credentialId?: string;
+  buildMode: HostingBuildMode;
+  sourceSubdirectory?: string;
+  buildCommand?: string;
+  outputDirectory?: string;
+  containerPort: number;
+  healthPath: string;
+  clusterId: string;
+  namespace: string;
+  replicas: number;
+  cpuRequest: string;
+  memoryRequest: string;
+  cpuLimit: string;
+  memoryLimit: string;
+  routeHost?: string;
+  routePath: string;
+  gatewayName?: string;
+  gatewayNamespace?: string;
+  autoDeploy: boolean;
+}
+
+export interface ApplicationWebhook {
+  url: string;
+  secret: string;
+}
+
+export interface HostingCapabilities {
+  hostingEnabled: boolean;
+  jenkinsConfigured: boolean;
+  allowedNamespaces: string[];
+  defaultNamespace: string;
+}
+
 export interface ResourceMapNode {
   id: string;
   label: string;

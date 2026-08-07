@@ -32,7 +32,7 @@ function AppLayoutContent() {
   const navigate = useNavigate();
   const routeClusterId = location.pathname.match(/^\/cluster\/([^/]+)/)?.[1];
   const [lastClusterId, setLastClusterId] = useState(() => localStorage.getItem('kust-selected-cluster') || undefined);
-  const keepsClusterContext = location.pathname === '/notifications' || location.pathname === '/settings' || location.pathname === '/system-settings';
+  const keepsClusterContext = location.pathname === '/notifications' || location.pathname === '/settings' || location.pathname === '/system-settings' || location.pathname === '/hosting';
   const clusterId = routeClusterId || (keepsClusterContext ? lastClusterId : undefined);
   const cluster = clusters.find((item) => item.id === clusterId);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('kust-sidebar-collapsed') === 'true');

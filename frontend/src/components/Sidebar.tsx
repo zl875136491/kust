@@ -4,6 +4,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CirclePlus,
+  Rocket,
   Home,
   Settings,
   Settings2,
@@ -89,6 +90,9 @@ export function Sidebar({
         <nav className="sidebar__nav" aria-label="主导航">
           <NavLink to="/" end className="nav-item" onClick={closeOnMobile} title={!expandedView ? '首页' : undefined}>
             <Home size={19} /><span>首页</span>
+          </NavLink>
+          <NavLink to="/hosting" className="nav-item" onClick={closeOnMobile} title={!expandedView ? '应用托管' : undefined}>
+            <Rocket size={19} /><span>应用托管</span>
           </NavLink>
 
           {cluster && (

@@ -8,6 +8,7 @@ import type {
   FileTreeResponse,
   AuthCapabilities, AuthState, PlatformSettings, PlatformSettingsUpdate, RegistrationProfile, ResourceMapResponse,
   Role, SearchResult, User, UserSettings, AuditLog, MetricsSummary, PodContainersResponse, Notification, DiscoveryResource,
+  ApplicationBuild, ApplicationWebhook, CreateGitCredentialPayload, CreateHostedApplicationPayload, GitCredential, HostedApplication, HostingCapabilities,
 } from './types';
 import { APP_BASE_PATH } from './runtime-config';
 import { MOCK_MODE } from './runtime-config';
@@ -23,6 +24,9 @@ const mockRoles = [
   { id: 'role-viewer', name: 'viewer', label: '只读用户', permissions: ['clusters:read', 'resources:read'], builtIn: true, createdAt: mockNow, updatedAt: mockNow },
 ];
 const mockEvents = [{ uid: 'event-1', name: 'deployment-available', namespace: 'default', kind: 'Event', status: 'Normal', createdAt: mockNow, labels: {}, annotations: {}, ownerReferences: [], details: { reason: 'DeploymentAvailable', message: '演示集群中的 Deployment 已就绪' } }];
+const mockHostingBuild: ApplicationBuild = { id: 'mock-build-1', applicationId: 'mock-app-1', gitRef: 'main', gitCommit: 'a1b2c3d4e5f6', status: 'succeeded', imageRef: '10.17.158.118/kust-apps/demo-site:sha-a1b2c3d4e5f6', imageDigestRef: '10.17.158.118/kust-apps/demo-site@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', message: '镜像已推送，Kust 已创建 Deployment、Service 与 HTTPRoute', createdAt: mockNow, startedAt: mockNow, finishedAt: mockNow };
+let mockApplications: HostedApplication[] = [{ id: 'mock-app-1', ownerUserId: 'mock-admin', name: '演示站点', slug: 'demo-site', repositoryUrl: 'https://gitlab.local/platform/demo-site.git', gitRef: 'main', buildMode: 'static', outputDirectory: 'dist', containerPort: 8080, healthPath: '/', clusterId: 'mock-cluster', namespace: 'default', replicas: 1, cpuRequest: '100m', memoryRequest: '128Mi', cpuLimit: '500m', memoryLimit: '512Mi', routeHost: 'apps.kust.local', routePath: '/apps/demo-site', gatewayName: 'public-gateway', gatewayNamespace: 'gateway-system', autoDeploy: true, webhookConfigured: true, createdAt: mockNow, updatedAt: mockNow, latestBuild: mockHostingBuild }];
+let mockCredentials: GitCredential[] = [{ id: 'mock-credential-1', name: 'GitLab read-only', credentialType: 'token', username: 'oauth2', createdAt: mockNow, updatedAt: mockNow }];
 
 async function mockRequest<T>(path: string, init?: RequestInit): Promise<T> {
   if (path === '/auth/me' || path === '/auth/login' || path === '/auth/register') return { user: mockUser, next: 'authenticated', token: 'kust-mock-token' } as T;
@@ -33,6 +37,16 @@ async function mockRequest<T>(path: string, init?: RequestInit): Promise<T> {
   if (path === '/admin/roles') return mockRoles as T;
   if (path.startsWith('/admin/audit-logs')) return [] as T;
   if (path === '/clusters') return [mockCluster] as T;
+  if (path === '/hosting/capabilities') return { hostingEnabled: true, jenkinsConfigured: true, allowedNamespaces: ['default'], defaultNamespace: 'default' } as T;
+  if (path === '/hosting/credentials' && !init?.method) return mockCredentials as T;
+  if (path === '/hosting/credentials' && init?.method === 'POST') { const payload = JSON.parse(String(init.body || '{}')); const credential = { id: `mock-credential-${Date.now()}`, name: payload.name, credentialType: payload.credentialType, username: payload.username, createdAt: mockNow, updatedAt: mockNow }; mockCredentials = [credential, ...mockCredentials]; return credential as T; }
+  if (path.startsWith('/hosting/credentials/') && init?.method === 'DELETE') { mockCredentials = mockCredentials.filter((credential) => credential.id !== path.split('/').pop()); return undefined as T; }
+  if (path === '/hosting/applications' && !init?.method) return mockApplications as T;
+  if (path === '/hosting/applications' && init?.method === 'POST') { const payload = JSON.parse(String(init.body || '{}')); const now = new Date().toISOString(); const slug = String(payload.name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''); const application: HostedApplication = { ...payload, id: `mock-app-${Date.now()}`, ownerUserId: 'mock-admin', slug, routePath: !payload.routePath || payload.routePath === '/' ? `/apps/${slug}` : payload.routePath, routeHost: payload.routeHost || 'apps.kust.local', gatewayName: payload.gatewayName || 'public-gateway', gatewayNamespace: payload.gatewayNamespace || 'gateway-system', webhookConfigured: false, createdAt: now, updatedAt: now }; mockApplications = [application, ...mockApplications]; return application as T; }
+  if (path.startsWith('/hosting/applications/') && path.endsWith('/builds')) { const id = path.split('/')[3]; const build = mockApplications.find((application) => application.id === id)?.latestBuild; return (build ? [build] : []) as T; }
+  if (path.startsWith('/hosting/applications/') && path.endsWith('/deploy') && init?.method === 'POST') { const id = path.split('/')[3]; const build = { ...mockHostingBuild, id: `mock-build-${Date.now()}`, applicationId: id, status: 'running' as const, createdAt: new Date().toISOString() }; mockApplications = mockApplications.map((application) => application.id === id ? { ...application, latestBuild: build } : application); return build as T; }
+  if (path.startsWith('/hosting/applications/') && path.endsWith('/webhook') && init?.method === 'POST') { const id = path.split('/')[3]; mockApplications = mockApplications.map((application) => application.id === id ? { ...application, webhookConfigured: true } : application); return { url: `http://localhost:5175/api/hosting/webhooks/gitlab/${id}`, secret: 'mock-webhook-secret-displayed-once' } as T; }
+  if (path.startsWith('/hosting/applications/') && init?.method === 'DELETE') { mockApplications = mockApplications.filter((application) => application.id !== path.split('/')[3]); return undefined as T; }
   if (path.includes('/resources/events')) return { kind: 'EventList', items: mockEvents } as T;
   if (path.includes('/resources/')) return { kind: 'ResourceList', items: [] } as T;
   if (path === '/health') return { status: 'ok', database: 'connected' } as T;
@@ -202,4 +216,16 @@ export const api = {
     const query = `?${params}`;
     return WS_ROOT + '/clusters/' + clusterId + '/pods/' + encodeURIComponent(namespace) + '/' + encodeURIComponent(pod) + '/shell' + query;
   },
+  hostingCapabilities: () => request<HostingCapabilities>('/hosting/capabilities'),
+  hostingCredentials: () => request<GitCredential[]>('/hosting/credentials'),
+  createHostingCredential: (payload: CreateGitCredentialPayload) => request<GitCredential>('/hosting/credentials', { method: 'POST', body: JSON.stringify(payload) }),
+  deleteHostingCredential: (id: string) => request<void>(`/hosting/credentials/${id}`, { method: 'DELETE' }),
+  hostedApplications: () => request<HostedApplication[]>('/hosting/applications'),
+  createHostedApplication: (payload: CreateHostedApplicationPayload) => request<HostedApplication>('/hosting/applications', { method: 'POST', body: JSON.stringify(payload) }),
+  hostedApplication: (id: string) => request<HostedApplication>(`/hosting/applications/${id}`),
+  hostedApplicationBuilds: (id: string) => request<ApplicationBuild[]>(`/hosting/applications/${id}/builds`),
+  deployHostedApplication: (id: string) => request<ApplicationBuild>(`/hosting/applications/${id}/deploy`, { method: 'POST' }),
+  rollbackHostedApplication: (id: string) => request<ApplicationBuild>(`/hosting/applications/${id}/rollback`, { method: 'POST' }),
+  rotateHostedApplicationWebhook: (id: string) => request<ApplicationWebhook>(`/hosting/applications/${id}/webhook`, { method: 'POST' }),
+  deleteHostedApplication: (id: string) => request<void>(`/hosting/applications/${id}`, { method: 'DELETE' }),
 };

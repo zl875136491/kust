@@ -5,6 +5,7 @@ import { LiquidGlassSystem } from './components/LiquidGlassSystem';
 import { ToastProvider } from './components/ui';
 import { DataProvider } from './data-context';
 import { HomePage } from './pages/HomePage';
+import { HostingPage } from './pages/HostingPage';
 import { MapPage } from './pages/MapPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { NotificationsPage } from './pages/NotificationsPage';
@@ -53,6 +54,7 @@ export default function App() {
                         <Route element={<AuthGate />}>
                           <Route element={<AppLayout />}>
                             <Route index element={<HomePage />} />
+                            <Route path="hosting" element={<HostingPage />} />
                             <Route path="notifications" element={<NotificationsPage />} />
                             <Route path="settings" element={<SettingsPage />} />
                             <Route element={<AdminGate />}>
