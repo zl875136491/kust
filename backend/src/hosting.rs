@@ -27,6 +27,11 @@ use crate::{
     state::SharedState,
 };
 
+// Jenkins may queue hosting builds behind other untrusted repository builds. Keep the
+// one-time source lease valid for the full pipeline window plus a small queue buffer.
+const SOURCE_LEASE_TTL_MILLIS: i64 = 60 * 60 * 1_000;
+const CALLBACK_TOKEN_TTL_MILLIS: i64 = 90 * 60 * 1_000;
+
 pub fn router_routes(router: axum::Router<SharedState>) -> axum::Router<SharedState> {
     router
         .route(
@@ -1128,12 +1133,12 @@ async fn trigger_build(
         finished_at: None,
         source_lease_token_hash: Some(auth::token_hash(&source_lease_token)),
         source_lease_expires_at: Some(DateTime::from_millis(
-            now.timestamp_millis() + 10 * 60 * 1_000,
+            now.timestamp_millis() + SOURCE_LEASE_TTL_MILLIS,
         )),
         source_lease_consumed_at: None,
         callback_token_hash: Some(auth::token_hash(&callback_token)),
         callback_token_expires_at: Some(DateTime::from_millis(
-            now.timestamp_millis() + 60 * 60 * 1_000,
+            now.timestamp_millis() + CALLBACK_TOKEN_TTL_MILLIS,
         )),
     };
     let build_id = build.id;
