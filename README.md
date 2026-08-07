@@ -310,6 +310,20 @@ npm run dev
 | `SPRINGBOARD_URL` | 内置 OA 地址 | OA 消息投递入口 |
 | `SPRINGBOARD_APP` | `kust` | OA 应用标识 |
 | `KUST_EXPOSE_LOCAL_RESET_CODES` | `false` | 仅本地调试时返回登录/重置码 |
+| `KUST_APP_HOSTING_ENABLED` | `false` | 启用 Git 仓库到 Kubernetes 的应用托管能力 |
+| `KUST_JENKINS_URL` | 无 | Jenkins 根地址，例如 `http://jenkins.internal` |
+| `KUST_JENKINS_USER` | 无 | 调用受控应用构建 Job 的 Jenkins 用户 |
+| `KUST_JENKINS_API_TOKEN` | 无 | Jenkins API Token，只能由后端运行环境读取 |
+| `KUST_JENKINS_APP_JOB` | `kust_customer_apps/application-hosting` | 固定的通用应用构建 Job 名称 |
+| `KUST_APP_CALLBACK_BASE_URL` | `FRONT_URL` | Jenkins 可访问的 Kust API 根地址；建议使用集群内 Service 地址 |
+| `KUST_APP_DEFAULT_GATEWAY_NAME` | 无 | 托管应用唯一允许使用的 Gateway 名称 |
+| `KUST_APP_DEFAULT_GATEWAY_NAMESPACE` | `default` | 该 Gateway 的命名空间 |
+| `KUST_APP_DEFAULT_ROUTE_HOST` | 无 | 托管 HTTPRoute 默认 Host，也是允许的域名边界 |
+| `KUST_APP_ROUTE_PREFIX` | `/apps` | 托管 HTTPRoute 唯一允许使用的路径前缀 |
+| `KUST_APP_HARBOR_REPOSITORY_PREFIX` | 无 | 托管应用镜像前缀，例如 `harbor.internal/kust-apps` |
+| `KUST_APP_IMAGE_PULL_SECRET` | 无 | 平台预置在允许命名空间中的 Harbor 拉取 Secret 名称 |
+| `KUST_APP_ALLOWED_NAMESPACES` | 无 | 逗号分隔的托管应用命名空间白名单；为空时不额外限制 |
+| `KUST_APP_ROLLOUT_TIMEOUT_SECONDS` | `180` | Deployment 与 HTTPRoute 就绪的最长等待时间，范围 30-900 秒 |
 | `RUST_LOG` | `kust_api=info,tower_http=info` | Rust tracing 过滤器 |
 | `VITE_API_URL` | 当前站点的 `<base>/api` | 前端编译时 API 根地址 |
 | `API_UPSTREAM` | `api:8080` | 前端容器 Nginx 的 API 上游 |
@@ -318,6 +332,72 @@ npm run dev
 `KUST_CACHE_TTL_SECONDS` 和 `KUST_CACHE_SYNC_SECONDS` 只用于首次创建全局平台设置；初始化后以 MongoDB 中管理员保存的值为准。
 
 默认相对配置路径从 `backend` crate 的编译位置解析。生产部署应使用绝对路径或容器 Secret 挂载，避免依赖本地目录布局。
+
+## 应用托管
+
+应用托管将 Git 仓库发布为 Kust 管理的 Kubernetes 应用。用户在“应用托管”中提供仓库、分支、构建方式、集群、命名空间和 HTTPRoute 路径；系统保存这些受限规格，并生成：
+
+```text
+Git repository -> Jenkins build -> Harbor digest
+  -> Kust callback -> Deployment + Service + HTTPRoute
+```
+
+Kust 是控制面：应用定义、Git 凭证元数据、构建记录和审计日志都保存在 MongoDB。Jenkins 仅用于隔离构建与推送镜像，**不持有 Kubernetes 集群凭证**。Jenkins 将不可变镜像 digest 回调给 Kust 后，Kust 才使用目标集群已加密保存的 kubeconfig 以 Server-Side Apply 创建或更新资源。
+
+### 支持的构建方式
+
+| 模式 | 用途 | 受控执行方式 |
+| --- | --- | --- |
+| `dockerfile` | 仓库已容器化 | 使用仓库根目录或子目录的 Dockerfile |
+| `buildpack` | 常见 Go/Java/Node/Python 服务 | Paketo Buildpacks |
+| `static` | Vite、React、Vue 等静态站点 | 执行构建命令并封装为受控 Nginx 镜像 |
+| `custom` | 非标准静态构建 | 仅运行填写的构建命令并封装静态产物 |
+
+静态镜像固定监听 `8080`，与 Kust 生成的 Service、健康检查和 HTTPRoute 后端端口一致。用户不能提交任意 Kubernetes YAML、ServiceAccount、HostPath、特权容器、Secret 挂载、Gateway 或集群范围资源。
+
+### Git 凭证与私有仓库
+
+应用用户可保存 Git Access Token 或 SSH Deploy Key。密钥使用 Kust 的 AES-256-GCM 密钥加密后写入 MongoDB，列表和 API 响应永远不会返回密钥内容。每次构建使用两个独立令牌：源码租约仅可在 10 分钟内读取一次，回调令牌只可反馈当前构建且最长有效 60 分钟。令牌均仅保存哈希，构建结束后的成功、失败或取消状态不再允许读取源码配置。
+
+仓库 URL 不能包含嵌入式用户名密码。建议为 GitLab 创建只读 Project Access Token 或 Deploy Key，并只授予目标项目的 `read_repository` 权限。
+
+### Jenkins Job 配置
+
+在本地 Jenkins 创建固定 Pipeline Job：
+
+```text
+kust_customer_apps/application-hosting
+```
+
+Pipeline script from SCM 指向本仓库的：
+
+```text
+ci/Jenkinsfile.application-hosting
+```
+
+该 Job 需要以下 Jenkins Credentials：
+
+| Credential ID | 类型 | 用途 |
+| --- | --- | --- |
+| `infra_harbor_auth` | Username with password | 仅推送受控 Harbor 应用镜像 |
+
+Jenkins agent 需要 `git`、`curl`、`jq`、Docker daemon；使用 `buildpack` 模式时还需要 `pack` CLI。`KUST_SOURCE_TOKEN` 与 `KUST_CALLBACK_TOKEN` 由 Kust 在触发 Job 时传入，Job 无需保存长期 Kust 回调 Secret。该 Job 不应使用 `tianjin_k8s_admin_token`，也不应 checkout 或执行目标仓库内的 `Jenkinsfile`。目标仓库属于不可信输入，必须运行在临时隔离 Agent 上，不能使用带生产凭据或宿主机网络的共享执行器。
+
+生产 runtime Secret 需要补充可选键 `jenkins-url`、`jenkins-user`、`jenkins-api-token`。部署模板已引用这些键；未配置 Jenkins 时，应用可保存但构建将保持排队。目标命名空间还需预先存在 `KUST_APP_IMAGE_PULL_SECRET` 指定的 Harbor 拉取 Secret。
+
+### GitLab 自动部署
+
+启用应用的“自动部署”后，在应用详情中点击“生成 Webhook”，将一次性显示的 URL 与 Secret 填入 GitLab 的 **Settings > Webhooks**，勾选 **Push events** 与需要的 **Tag push events**。Kust 只接受该应用配置分支或 Tag 的事件，同一应用已有排队或运行构建时会拒绝重复触发。重新生成会立即使旧 Secret 失效。
+
+### Gateway 与路由策略
+
+第一阶段建议使用一个平台维护的域名和路径规则，例如：
+
+```text
+http://k8s.1oa.com.cn/apps/<team>/<application>
+```
+
+配置 `KUST_APP_DEFAULT_ROUTE_HOST=k8s.1oa.com.cn` 后，后端只接受该 Host 或其受控子域。`KUST_APP_ROUTE_PREFIX` 默认是 `/apps`，每个新应用的空路径会自动归一化为 `/apps/<application-slug>`，平台拒绝 `/`、`/kust` 和其他前缀，避免抢占 Kust 自身路由。Gateway 引用由 `KUST_APP_DEFAULT_GATEWAY_NAME` 和 `KUST_APP_DEFAULT_GATEWAY_NAMESPACE` 固定，普通用户不能覆盖。目标 Gateway 必须允许指定命名空间中的 HTTPRoute 绑定；跨命名空间 Gateway 环境还需要按 Gateway API 策略预先配置允许引用的权限。
 
 ## API 概览
 

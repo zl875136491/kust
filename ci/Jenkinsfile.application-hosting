@@ -1,0 +1,165 @@
+pipeline {
+  // User repositories are untrusted build input. Keep this label on an isolated Docker-capable agent.
+  agent { label "docker" }
+  options {
+    skipDefaultCheckout(true)
+    timeout(time: 45, unit: "MINUTES")
+    buildDiscarder(logRotator(numToKeepStr: "40", artifactNumToKeepStr: "40"))
+    timestamps()
+  }
+  parameters {
+    string(name: "APPLICATION_ID", trim: true)
+    string(name: "BUILD_ID", trim: true)
+    string(name: "REPOSITORY_URL", trim: true)
+    string(name: "GIT_REF", trim: true)
+    choice(name: "BUILD_MODE", choices: ["dockerfile", "buildpack", "static", "custom"])
+    string(name: "IMAGE_REPOSITORY", trim: true)
+    string(name: "KUST_CALLBACK_URL", trim: true)
+    password(name: "KUST_SOURCE_TOKEN", defaultValue: "", description: "One-time Kust source lease")
+    password(name: "KUST_CALLBACK_TOKEN", defaultValue: "", description: "Per-build Kust callback token")
+  }
+  environment {
+    HARBOR_REGISTRY = "10.17.158.118"
+    BUILDKIT_NO_CLIENT_TOKEN = "true"
+  }
+  stages {
+    stage("Validate") {
+      steps {
+        script {
+          if (!params.BUILD_ID || !params.APPLICATION_ID || !params.REPOSITORY_URL || !params.IMAGE_REPOSITORY || !params.KUST_CALLBACK_URL) {
+            error("Hosting build parameters are incomplete.")
+          }
+          if (!params.IMAGE_REPOSITORY.startsWith("${env.HARBOR_REGISTRY}/")) {
+            error("IMAGE_REPOSITORY must use the approved Harbor registry.")
+          }
+        }
+      }
+    }
+    stage("Load source lease") {
+      steps {
+        sh '''#!/usr/bin/env bash
+set -Eeuo pipefail
+set +x
+test -n "${KUST_SOURCE_TOKEN}"
+curl --fail --silent --show-error --header "X-Kust-Build-Token: ${KUST_SOURCE_TOKEN}" "${KUST_CALLBACK_URL%/callback}/source" > source.json
+test -s source.json
+'''
+      }
+    }
+    stage("Checkout") {
+      steps {
+        sh '''#!/usr/bin/env bash
+set -Eeuo pipefail
+set +x
+repo="$(jq -r '.repositoryUrl' source.json)"
+ref="$(jq -r '.gitRef' source.json)"
+kind="$(jq -r '.credential.type // empty' source.json)"
+username="$(jq -r '.credential.username // "oauth2"' source.json)"
+secret="$(jq -r '.credential.secret // empty' source.json)"
+rm -rf app
+if [ "${kind}" = "ssh_key" ]; then
+  key="$(mktemp)"
+  trap 'rm -f "${key}"' EXIT
+  printf '%s' "${secret}" > "${key}"
+  chmod 600 "${key}"
+  GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new -i ${key}" git clone --no-checkout "${repo}" app
+elif [ "${kind}" = "token" ]; then
+  askpass="$(mktemp)"
+  trap 'rm -f "${askpass}"' EXIT
+  cat > "${askpass}" <<'EOF'
+#!/bin/sh
+printf '%s\n' "${KUST_GIT_SECRET}"
+EOF
+  chmod 700 "${askpass}"
+  KUST_GIT_SECRET="${secret}" GIT_ASKPASS="${askpass}" GIT_TERMINAL_PROMPT=0 git clone --no-checkout "https://${username}@${repo#*://}" app
+else
+  git clone --no-checkout "${repo}" app
+fi
+unset secret
+cd app
+git fetch --depth=1 origin "${ref}"
+git checkout --detach FETCH_HEAD
+git rev-parse HEAD > ../git-commit.txt
+cd ..
+jq '{sourceSubdirectory, buildCommand, outputDirectory}' source.json > build-input.json
+rm -f source.json
+'''
+      }
+    }
+    stage("Build image") {
+      steps {
+        sh '''#!/usr/bin/env bash
+set -Eeuo pipefail
+commit="$(cat git-commit.txt)"
+image="${IMAGE_REPOSITORY}:sha-${commit:0:12}"
+subdir="$(jq -r '.sourceSubdirectory // empty' build-input.json)"
+command="$(jq -r '.buildCommand // empty' build-input.json)"
+output="$(jq -r '.outputDirectory // empty' build-input.json)"
+work=app
+[ -z "${subdir}" ] || work="app/${subdir}"
+test -d "${work}"
+case "${BUILD_MODE}" in
+  dockerfile) docker build --pull --provenance=false --tag "${image}" "${work}" ;;
+  buildpack) pack build "${image}" --path "${work}" --builder paketobuildpacks/builder-jammy-base ;;
+  static|custom)
+    [ -n "${command}" ] || command="npm ci && npm run build"
+    docker run --rm -v "${PWD}/${work}:/workspace" -w /workspace node:22-bookworm bash -lc "${command}"
+    [ -n "${output}" ] || output=dist
+    test -d "${work}/${output}"
+    temp="$(mktemp -d)"
+    trap 'rm -rf "${temp}"' EXIT
+    cp -a "${work}/${output}/." "${temp}/"
+    cat > "${temp}/default.conf" <<'EOF'
+server {
+  listen 8080;
+  server_name _;
+  root /usr/share/nginx/html;
+  index index.html;
+  location / { try_files $uri $uri/ /index.html; }
+}
+EOF
+    printf 'FROM nginx:1.27-alpine\nCOPY default.conf /etc/nginx/conf.d/default.conf\nCOPY . /usr/share/nginx/html\nEXPOSE 8080\n' > "${temp}/Dockerfile"
+    docker build --pull --provenance=false --tag "${image}" "${temp}"
+    ;;
+  *) exit 2 ;;
+esac
+printf '%s' "${image}" > image-ref.txt
+'''
+      }
+    }
+    stage("Push and callback") {
+      steps {
+        withCredentials([
+          usernamePassword(credentialsId: "infra_harbor_auth", usernameVariable: "HARBOR_USERNAME", passwordVariable: "HARBOR_PASSWORD")
+        ]) {
+          sh '''#!/usr/bin/env bash
+set -Eeuo pipefail
+set +x
+image="$(cat image-ref.txt)"
+commit="$(cat git-commit.txt)"
+config="$(mktemp -d)"
+trap 'docker logout "${HARBOR_REGISTRY}" >/dev/null 2>&1 || true; rm -rf "${config}"' EXIT
+export DOCKER_CONFIG="${config}"
+printf '%s' "${HARBOR_PASSWORD}" | docker login "${HARBOR_REGISTRY}" --username "${HARBOR_USERNAME}" --password-stdin >/dev/null
+docker push "${image}" | tee push.log
+digest="$(awk '/digest: sha256:/{for (i = 1; i <= NF; i++) if ($i ~ /^sha256:/) {print $i; exit}}' push.log)"
+test -n "${digest}"
+digest_ref="${IMAGE_REPOSITORY}@${digest}"
+payload="$(jq -n --arg status succeeded --arg commit "${commit}" --arg image "${image}" --arg digest "${digest_ref}" --arg url "${BUILD_URL}" '{status:$status,gitCommit:$commit,imageRef:$image,imageDigestRef:$digest,jenkinsBuildUrl:$url,message:"Image pushed; Kust is applying controlled Kubernetes resources"}')"
+curl --fail --silent --show-error --header "X-Kust-Build-Token: ${KUST_CALLBACK_TOKEN}" --header "Content-Type: application/json" --data "${payload}" "${KUST_CALLBACK_URL}"
+'''
+        }
+      }
+    }
+  }
+  post {
+    failure {
+      sh '''#!/usr/bin/env bash
+set +e
+payload="$(jq -n --arg status failed --arg message "Jenkins build failed: ${BUILD_URL}" --arg url "${BUILD_URL}" '{status:$status,message:$message,jenkinsBuildUrl:$url}')"
+curl --silent --show-error --header "X-Kust-Build-Token: ${KUST_CALLBACK_TOKEN}" --header "Content-Type: application/json" --data "${payload}" "${KUST_CALLBACK_URL}" || true
+'''
+    }
+    always { sh "rm -rf app source.json build-input.json git-commit.txt image-ref.txt push.log || true" }
+  }
+}
