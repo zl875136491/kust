@@ -1187,6 +1187,26 @@ async fn trigger_build(
     if !state.config.app_hosting_enabled {
         return Err(AppError::conflict("application hosting is disabled"));
     }
+    // A Jenkinsfile compilation failure happens before the pipeline can call our
+    // callback endpoint. Once its callback token has expired, the build can no
+    // longer make progress and must not block the application's next deployment.
+    state
+        .application_builds
+        .update_many(
+            doc! {
+                "application_id": app.id,
+                "status": {"$in": ["queued", "running"]},
+                "callback_token_expires_at": {"$lt": DateTime::now()},
+            },
+            doc! {
+                "$set": {
+                    "status": "failed",
+                    "message": "Build callback expired before Jenkins reported a terminal result",
+                    "finished_at": DateTime::now(),
+                },
+            },
+        )
+        .await?;
     if state
         .application_builds
         .find_one(doc! {"application_id": app.id, "status": {"$in": ["queued", "running"]}})
