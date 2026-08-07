@@ -1,6 +1,9 @@
 use axum::{
     extract::{Path, State},
-    http::{header::AUTHORIZATION, HeaderMap, StatusCode},
+    http::{
+        header::{AUTHORIZATION, COOKIE, SET_COOKIE},
+        HeaderMap, StatusCode,
+    },
     response::{IntoResponse, Response},
     Json,
 };
@@ -1139,6 +1142,9 @@ async fn trigger_build(
             .send()
             .await
         {
+            if let Some(cookies) = jenkins_session_cookie(crumb_response.headers()) {
+                trigger = trigger.header(COOKIE, cookies);
+            }
             if crumb_response.status().is_success() {
                 if let Ok(crumb) = crumb_response.json::<serde_json::Value>().await {
                     if let (Some(field), Some(value)) = (
@@ -1247,6 +1253,17 @@ fn jenkins_endpoint(base: &str, job: &str, action: &str) -> String {
         .collect::<Vec<_>>()
         .join("/");
     format!("{}/{path}/{action}", base.trim_end_matches('/'))
+}
+
+fn jenkins_session_cookie(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    let value = headers
+        .get_all(SET_COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .filter_map(|value| value.split(';').next())
+        .collect::<Vec<_>>()
+        .join("; ");
+    (!value.is_empty()).then_some(value)
 }
 
 async fn build_callback(
@@ -1485,7 +1502,7 @@ fn require_build_callback_token(
 #[cfg(test)]
 mod tests {
     use super::{
-        slugify, valid_digest_reference, valid_dns_label, validate_git_ref,
+        jenkins_session_cookie, slugify, valid_digest_reference, valid_dns_label, validate_git_ref,
         validate_relative_directory, validate_repository,
     };
 
@@ -1539,5 +1556,22 @@ mod tests {
         assert!(validate_git_ref("release..candidate").is_err());
         assert!(validate_relative_directory(Some("dist/client"), "output directory").is_ok());
         assert!(validate_relative_directory(Some("../secrets"), "output directory").is_err());
+    }
+
+    #[test]
+    fn forwards_only_jenkins_cookie_pairs_with_the_crumb() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.append(
+            reqwest::header::SET_COOKIE,
+            "JSESSIONID=node0; Path=/; HttpOnly".parse().unwrap(),
+        );
+        headers.append(
+            reqwest::header::SET_COOKIE,
+            "jenkins-timestamper-offset=1; Path=/".parse().unwrap(),
+        );
+        assert_eq!(
+            jenkins_session_cookie(&headers).as_deref(),
+            Some("JSESSIONID=node0; jenkins-timestamper-offset=1")
+        );
     }
 }
