@@ -118,10 +118,10 @@ build_args=(
   --build-arg "GLOBAL_AGENT_HTTP_PROXY=${HTTP_PROXY}"
   --build-arg "GLOBAL_AGENT_HTTPS_PROXY=${HTTPS_PROXY}"
 )
-while IFS=$'\t' read -r key value; do
+while IFS= read -r key && IFS= read -r value; do
   [ -n "${key}" ] || continue
   build_args+=(--build-arg "${key}=${value}")
-done < <(jq -r '.buildEnvironment // {} | to_entries[] | "\(.key)\t\(.value)"' build-input.json)
+done < <(jq -r '.buildEnvironment // {} | to_entries[] | .key, .value' build-input.json)
 
 # Docker proxy build args are available only to stages that declare them. Render a
 # temporary Dockerfile which declares the controlled build environment after every
@@ -130,16 +130,21 @@ done < <(jq -r '.buildEnvironment // {} | to_entries[] | "\(.key)\t\(.value)"' b
 render_dockerfile() {
   local source="$1" target="$2"
   local injected="${target}.env"
+  local key value line dollar='$'
   {
-    printf '%s\n' 'ARG HTTP_PROXY' 'ARG HTTPS_PROXY' 'ARG NO_PROXY' 'ARG GLOBAL_AGENT_HTTP_PROXY' 'ARG GLOBAL_AGENT_HTTPS_PROXY'
-    printf '%s\n' 'ENV HTTP_PROXY=${HTTP_PROXY} HTTPS_PROXY=${HTTPS_PROXY} NO_PROXY=${NO_PROXY} http_proxy=${HTTP_PROXY} https_proxy=${HTTPS_PROXY} no_proxy=${NO_PROXY} GLOBAL_AGENT_HTTP_PROXY=${GLOBAL_AGENT_HTTP_PROXY} GLOBAL_AGENT_HTTPS_PROXY=${GLOBAL_AGENT_HTTPS_PROXY}'
-    jq -r '.buildEnvironment // {} | to_entries[] | "ARG \(.key)\nENV \(.key)=${\(.key)}"' build-input.json
+    printf '%s\n' "ARG HTTP_PROXY" "ARG HTTPS_PROXY" "ARG NO_PROXY" "ARG GLOBAL_AGENT_HTTP_PROXY" "ARG GLOBAL_AGENT_HTTPS_PROXY"
+    printf '%s\n' "ENV HTTP_PROXY=${dollar}{HTTP_PROXY} HTTPS_PROXY=${dollar}{HTTPS_PROXY} NO_PROXY=${dollar}{NO_PROXY} http_proxy=${dollar}{HTTP_PROXY} https_proxy=${dollar}{HTTPS_PROXY} no_proxy=${dollar}{NO_PROXY} GLOBAL_AGENT_HTTP_PROXY=${dollar}{GLOBAL_AGENT_HTTP_PROXY} GLOBAL_AGENT_HTTPS_PROXY=${dollar}{GLOBAL_AGENT_HTTPS_PROXY}"
+    while IFS= read -r key && IFS= read -r value; do
+      [ -n "${key}" ] || continue
+      printf '%s\n' "ARG ${key}" "ENV ${key}=${dollar}{${key}}"
+    done < <(jq -r '.buildEnvironment // {} | to_entries[] | .key, .value' build-input.json)
   } > "${injected}"
-  awk -v injected="${injected}" '
-    BEGIN { while ((getline line < injected) > 0) additions = additions line "\n"; close(injected) }
-    /^[[:space:]]*FROM[[:space:]]/ { print; printf "%s", additions; next }
-    { print }
-  ' "${source}" > "${target}"
+  while IFS= read -r line || [ -n "${line}" ]; do
+    printf '%s\n' "${line}"
+    if [[ "${line}" =~ ^[[:space:]]*FROM[[:space:]] ]]; then
+      cat "${injected}"
+    fi
+  done < "${source}" > "${target}"
 }
 case "${BUILD_MODE}" in
   dockerfile)
