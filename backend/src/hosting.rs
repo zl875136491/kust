@@ -36,7 +36,9 @@ const UNCLAIMED_BUILD_GRACE_MILLIS: i64 = 15 * 60 * 1_000;
 // disconnected Jenkins job. A build with a cleared callback token has already
 // handed its immutable image to Kust, so allow extra time for rollout before
 // making it eligible for a retry as well.
-const UNCALLED_BUILD_GRACE_MILLIS: i64 = CALLBACK_TOKEN_TTL_MILLIS;
+// Jenkins jobs are capped at 45 minutes. Allow a small delivery buffer before
+// reclaiming a job that produced no immutable image or callback at all.
+const UNCALLED_BUILD_GRACE_MILLIS: i64 = 60 * 60 * 1_000;
 const UNFINISHED_ROLLOUT_GRACE_MILLIS: i64 = 45 * 60 * 1_000;
 
 pub fn router_routes(router: axum::Router<SharedState>) -> axum::Router<SharedState> {
