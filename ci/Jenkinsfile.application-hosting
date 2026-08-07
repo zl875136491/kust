@@ -62,7 +62,8 @@ if [ "${kind}" = "ssh_key" ]; then
   trap 'rm -f "${key}"' EXIT
   printf '%s' "${secret}" > "${key}"
   chmod 600 "${key}"
-  GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new -i ${key}" git clone --no-checkout "${repo}" app
+  export GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new -i ${key}"
+  git clone --no-checkout "${repo}" app
 elif [ "${kind}" = "token" ]; then
   askpass="$(mktemp)"
   trap 'rm -f "${askpass}"' EXIT
@@ -71,16 +72,19 @@ elif [ "${kind}" = "token" ]; then
 printf '%s\n' "${KUST_GIT_SECRET}"
 EOF
   chmod 700 "${askpass}"
-  KUST_GIT_SECRET="${secret}" GIT_ASKPASS="${askpass}" GIT_TERMINAL_PROMPT=0 git clone --no-checkout "https://${username}@${repo#*://}" app
+  export KUST_GIT_SECRET="${secret}"
+  export GIT_ASKPASS="${askpass}"
+  export GIT_TERMINAL_PROMPT=0
+  git clone --no-checkout "https://${username}@${repo#*://}" app
 else
   git clone --no-checkout "${repo}" app
 fi
-unset secret
 cd app
 git fetch --depth=1 origin "${ref}"
 git checkout --detach FETCH_HEAD
 git rev-parse HEAD > ../git-commit.txt
 cd ..
+unset secret KUST_GIT_SECRET GIT_ASKPASS GIT_TERMINAL_PROMPT GIT_SSH_COMMAND || true
 jq '{sourceSubdirectory, buildCommand, outputDirectory}' source.json > build-input.json
 rm -f source.json
 '''
