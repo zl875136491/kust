@@ -94,7 +94,7 @@ git checkout --detach FETCH_HEAD
 git rev-parse HEAD > ../git-commit.txt
 cd ..
 unset secret KUST_GIT_SECRET GIT_ASKPASS GIT_TERMINAL_PROMPT GIT_SSH_COMMAND || true
-jq '{sourceSubdirectory, buildCommand, outputDirectory}' source.json > build-input.json
+jq '{sourceSubdirectory, buildCommand, outputDirectory, buildEnvironment}' source.json > build-input.json
 rm -f source.json
 '''
       }
@@ -111,8 +111,43 @@ output="$(jq -r '.outputDirectory // empty' build-input.json)"
 work=app
 [ -z "${subdir}" ] || work="app/${subdir}"
 test -d "${work}"
+build_args=(
+  --build-arg "HTTP_PROXY=${HTTP_PROXY}"
+  --build-arg "HTTPS_PROXY=${HTTPS_PROXY}"
+  --build-arg "NO_PROXY=${NO_PROXY}"
+  --build-arg "GLOBAL_AGENT_HTTP_PROXY=${HTTP_PROXY}"
+  --build-arg "GLOBAL_AGENT_HTTPS_PROXY=${HTTPS_PROXY}"
+)
+while IFS=$'\t' read -r key value; do
+  [ -n "${key}" ] || continue
+  build_args+=(--build-arg "${key}=${value}")
+done < <(jq -r '.buildEnvironment // {} | to_entries[] | "\(.key)\t\(.value)"' build-input.json)
+
+# Docker proxy build args are available only to stages that declare them. Render a
+# temporary Dockerfile which declares the controlled build environment after every
+# FROM line, without modifying the user repository. This also covers Node tools
+# such as global-agent that need GLOBAL_AGENT_HTTPS_PROXY explicitly.
+render_dockerfile() {
+  local source="$1" target="$2"
+  local injected="${target}.env"
+  {
+    printf '%s\n' 'ARG HTTP_PROXY' 'ARG HTTPS_PROXY' 'ARG NO_PROXY' 'ARG GLOBAL_AGENT_HTTP_PROXY' 'ARG GLOBAL_AGENT_HTTPS_PROXY'
+    printf '%s\n' 'ENV HTTP_PROXY=${HTTP_PROXY} HTTPS_PROXY=${HTTPS_PROXY} NO_PROXY=${NO_PROXY} http_proxy=${HTTP_PROXY} https_proxy=${HTTPS_PROXY} no_proxy=${NO_PROXY} GLOBAL_AGENT_HTTP_PROXY=${GLOBAL_AGENT_HTTP_PROXY} GLOBAL_AGENT_HTTPS_PROXY=${GLOBAL_AGENT_HTTPS_PROXY}'
+    jq -r '.buildEnvironment // {} | to_entries[] | "ARG \(.key)\nENV \(.key)=${\(.key)}"' build-input.json
+  } > "${injected}"
+  awk -v injected="${injected}" '
+    BEGIN { while ((getline line < injected) > 0) additions = additions line "\n"; close(injected) }
+    /^[[:space:]]*FROM[[:space:]]/ { print; printf "%s", additions; next }
+    { print }
+  ' "${source}" > "${target}"
+}
 case "${BUILD_MODE}" in
-  dockerfile) docker build --pull --provenance=false --build-arg HTTP_PROXY --build-arg HTTPS_PROXY --build-arg NO_PROXY --tag "${image}" "${work}" ;;
+  dockerfile)
+    dockerfile="$(mktemp "${WORKSPACE_TMP:-/tmp}/kust-Dockerfile.XXXXXX")"
+    render_dockerfile "${work}/Dockerfile" "${dockerfile}"
+    trap 'rm -f "${dockerfile}" "${dockerfile}.env"' EXIT
+    docker build --pull --provenance=false "${build_args[@]}" --file "${dockerfile}" --tag "${image}" "${work}"
+    ;;
   buildpack) pack build "${image}" --path "${work}" --builder paketobuildpacks/builder-jammy-base ;;
   static|custom)
     [ -n "${command}" ] || command="npm ci && npm run build"

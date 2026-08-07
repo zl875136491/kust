@@ -1638,15 +1638,21 @@ pub async fn apply_hosted_application(
         "kust.dev/application-slug": application.slug,
     });
     let mut pod_spec = json!({
-        "securityContext": {"runAsNonRoot": true},
+        "securityContext": {"runAsNonRoot": application.runtime_profile != "root_compatible"},
         "containers": [{
             "name": "app", "image": image_digest_ref,
             "ports": [{"containerPort": application.container_port, "name": "http"}],
             "securityContext": {"allowPrivilegeEscalation": false, "readOnlyRootFilesystem": false, "capabilities": {"drop": ["ALL"]}},
-            "readinessProbe": {"httpGet": {"path": application.health_path, "port": "http"}, "initialDelaySeconds": 3, "periodSeconds": 8},
-            "livenessProbe": {"httpGet": {"path": application.health_path, "port": "http"}, "initialDelaySeconds": 12, "periodSeconds": 16}
+            "readinessProbe": {"httpGet": {"path": application.health_path, "port": "http", "scheme": application.health_scheme}, "initialDelaySeconds": 3, "periodSeconds": 8},
+            "livenessProbe": {"httpGet": {"path": application.health_path, "port": "http", "scheme": application.health_scheme}, "initialDelaySeconds": 12, "periodSeconds": 16}
         }]
     });
+    if application.runtime_profile == "root_compatible" {
+        pod_spec
+            .as_object_mut()
+            .expect("hosted application pod spec must be an object")
+            .remove("securityContext");
+    }
     if let Some(name) = image_pull_secret {
         pod_spec["imagePullSecrets"] = json!([{"name": name}]);
     }
@@ -1664,7 +1670,7 @@ pub async fn apply_hosted_application(
     });
     let service = json!({
         "apiVersion": "v1", "kind": "Service",
-        "metadata": {"name": application.slug, "namespace": application.namespace, "labels": labels},
+        "metadata": {"name": application.slug, "namespace": application.namespace, "labels": labels, "annotations": {"traefik.io/service.serversscheme": application.service_scheme.to_lowercase()}},
         "spec": {"selector": {"app.kubernetes.io/name": application.slug}, "ports": [{"name": "http", "port": application.container_port, "targetPort": "http"}]}
     });
     let route = json!({

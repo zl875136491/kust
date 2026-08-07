@@ -278,8 +278,12 @@ export interface HostedApplication {
   sourceSubdirectory?: string;
   buildCommand?: string;
   outputDirectory?: string;
+  buildEnvironment: Record<string, string>;
+  runtimeProfile: 'non_root' | 'root_compatible';
   containerPort: number;
   healthPath: string;
+  healthScheme: 'HTTP' | 'HTTPS';
+  serviceScheme: 'HTTP' | 'HTTPS';
   clusterId: string;
   namespace: string;
   replicas: number;
@@ -314,8 +318,12 @@ export interface CreateHostedApplicationPayload {
   sourceSubdirectory?: string;
   buildCommand?: string;
   outputDirectory?: string;
+  buildEnvironment: Record<string, string>;
+  runtimeProfile: 'non_root' | 'root_compatible';
   containerPort: number;
   healthPath: string;
+  healthScheme: 'HTTP' | 'HTTPS';
+  serviceScheme: 'HTTP' | 'HTTPS';
   clusterId: string;
   namespace: string;
   replicas: number;
@@ -328,6 +336,27 @@ export interface CreateHostedApplicationPayload {
   gatewayName?: string;
   gatewayNamespace?: string;
   autoDeploy: boolean;
+}
+
+export interface UpdateHostedApplicationPayload {
+  gitRef?: string;
+  buildMode?: HostingBuildMode;
+  sourceSubdirectory?: string;
+  buildCommand?: string;
+  outputDirectory?: string;
+  buildEnvironment?: Record<string, string>;
+  runtimeProfile?: 'non_root' | 'root_compatible';
+  containerPort?: number;
+  healthPath?: string;
+  healthScheme?: 'HTTP' | 'HTTPS';
+  serviceScheme?: 'HTTP' | 'HTTPS';
+  replicas?: number;
+  cpuRequest?: string;
+  memoryRequest?: string;
+  cpuLimit?: string;
+  memoryLimit?: string;
+  routePath?: string;
+  autoDeploy?: boolean;
 }
 
 export interface ApplicationWebhook {

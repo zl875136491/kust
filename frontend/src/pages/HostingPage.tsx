@@ -1,4 +1,4 @@
-import { ArrowUpRight, CirclePlus, Clock3, ExternalLink, GitBranch, KeyRound, Link2, LoaderCircle, PackageCheck, RefreshCw, RotateCcw, Rocket, ShieldCheck, Trash2 } from 'lucide-react';
+import { ArrowUpRight, CirclePlus, Clock3, ExternalLink, GitBranch, KeyRound, Link2, LoaderCircle, PackageCheck, RefreshCw, RotateCcw, Rocket, Settings2, ShieldCheck, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { useData } from '../data-context';
@@ -13,8 +13,20 @@ const modeOptions: Array<{ value: HostingBuildMode; label: string; detail: strin
 ];
 
 const initialApplication = (): CreateHostedApplicationPayload => ({
-  name: '', repositoryUrl: '', gitRef: 'main', buildMode: 'dockerfile', sourceSubdirectory: '', buildCommand: '', outputDirectory: 'dist', containerPort: 8080, healthPath: '/', clusterId: '', namespace: 'default', replicas: 1, cpuRequest: '100m', memoryRequest: '128Mi', cpuLimit: '500m', memoryLimit: '512Mi', routePath: '/', autoDeploy: false,
+  name: '', repositoryUrl: '', gitRef: 'main', buildMode: 'dockerfile', sourceSubdirectory: '', buildCommand: '', outputDirectory: 'dist', buildEnvironment: {}, runtimeProfile: 'non_root', containerPort: 8080, healthPath: '/', healthScheme: 'HTTP', serviceScheme: 'HTTP', clusterId: '', namespace: 'default', replicas: 1, cpuRequest: '100m', memoryRequest: '128Mi', cpuLimit: '500m', memoryLimit: '512Mi', routePath: '/', autoDeploy: false,
 });
+
+function environmentText(environment: Record<string, string>) {
+  return Object.entries(environment).map(([key, value]) => `${key}=${value}`).join('\n');
+}
+
+function parseEnvironment(value: string) {
+  return value.split('\n').reduce<Record<string, string>>((environment, line) => {
+    const separator = line.indexOf('=');
+    if (separator > 0) environment[line.slice(0, separator).trim()] = line.slice(separator + 1).trim();
+    return environment;
+  }, {});
+}
 
 function formatDate(value?: string) {
   if (!value) return '-';
@@ -33,6 +45,7 @@ export function HostingPage() {
   const [selected, setSelected] = useState<HostedApplication>();
   const [deleting, setDeleting] = useState<HostedApplication>();
   const [webhook, setWebhook] = useState<ApplicationWebhook>();
+  const [compatibility, setCompatibility] = useState<HostedApplication>();
 
   const reload = async () => {
     setLoading(true);
@@ -73,7 +86,8 @@ export function HostingPage() {
     </section>}
     <CreateApplicationModal open={createOpen} clusters={clusters} credentials={credentials} capabilities={capabilities} onClose={() => setCreateOpen(false)} onCreated={(application) => { setApplications((current) => [application, ...current]); setCreateOpen(false); void deploy(application); }} />
     <CredentialsModal open={credentialOpen} credentials={credentials} onClose={() => setCredentialOpen(false)} onChanged={setCredentials} />
-    <ApplicationDetailModal application={selected} onClose={() => { setSelected(undefined); setWebhook(undefined); }} onDeploy={deploy} webhook={webhook} onConfigureWebhook={async (application) => { try { const value = await api.rotateHostedApplicationWebhook(application.id); setWebhook(value); setApplications((current) => current.map((item) => item.id === application.id ? { ...item, webhookConfigured: true } : item)); setSelected((current) => current?.id === application.id ? { ...current, webhookConfigured: true } : current); pushToast('GitLab Webhook 密钥已生成，仅在当前窗口展示一次'); } catch (error) { pushToast(error instanceof Error ? error.message : '无法生成 GitLab Webhook 配置', 'error'); } }} />
+    <ApplicationDetailModal application={selected} onClose={() => { setSelected(undefined); setWebhook(undefined); }} onDeploy={deploy} onConfigureCompatibility={setCompatibility} webhook={webhook} onConfigureWebhook={async (application) => { try { const value = await api.rotateHostedApplicationWebhook(application.id); setWebhook(value); setApplications((current) => current.map((item) => item.id === application.id ? { ...item, webhookConfigured: true } : item)); setSelected((current) => current?.id === application.id ? { ...current, webhookConfigured: true } : current); pushToast('GitLab Webhook 密钥已生成，仅在当前窗口展示一次'); } catch (error) { pushToast(error instanceof Error ? error.message : '无法生成 GitLab Webhook 配置', 'error'); } }} />
+    <CompatibilityModal application={compatibility} onClose={() => setCompatibility(undefined)} onSaved={(application) => { setApplications((current) => current.map((item) => item.id === application.id ? application : item)); setSelected((current) => current?.id === application.id ? application : current); setCompatibility(undefined); pushToast('兼容性设置已保存，请重新部署应用'); }} />
     <Modal open={Boolean(deleting)} onClose={() => setDeleting(undefined)} title={`删除 ${deleting?.name || ''}`} width="460px" footer={(requestClose) => <><Button variant="ghost" onClick={requestClose}>取消</Button><Button variant="danger" icon={<Trash2 size={16} />} onClick={() => void remove()}>删除应用</Button></>}>
       <p className="confirm-copy">Kust 将删除它管理的 Deployment、Service 与 HTTPRoute。Harbor 中已构建的镜像不会被立即清理。</p>
     </Modal>
@@ -103,7 +117,7 @@ function CreateApplicationModal({ open, clusters, credentials, capabilities, onC
   return <Modal open={open} onClose={onClose} title="新建托管应用" description="Kust 保存受限规格，Jenkins 构建不可变镜像，后端发布受控 Kubernetes 资源。" width="980px" className="modal--hosting" dirty={Boolean(value.name || value.repositoryUrl)} closeDisabled={submitting} onSave={submit} onDiscard={() => setValue(initialApplication())} footer={(requestClose) => <><Button variant="ghost" onClick={requestClose}>取消</Button><Button variant="primary" icon={<Rocket size={16} />} onClick={() => void submit()} disabled={submitting}>{submitting ? '保存中' : '创建应用'}</Button></>}>
     <div className="hosting-form">
       <section><header><GitBranch size={17} /><div><strong>源码</strong><span>仓库凭证仅加密保存，构建时短暂提供给 Jenkins。</span></div></header><div className="form-grid"><label className="field"><span>应用名称</span><input value={value.name} onChange={(event) => set('name', event.target.value)} placeholder="orders-web" autoFocus /></label><label className="field"><span>分支或标签</span><input value={value.gitRef} onChange={(event) => set('gitRef', event.target.value)} placeholder="main" /></label></div><label className="field"><span>Git 仓库地址</span><input value={value.repositoryUrl} onChange={(event) => set('repositoryUrl', event.target.value)} placeholder="https://gitlab.example.com/team/orders-web.git" /></label><div className="form-grid"><SelectMenu label="Git 凭证" value={value.credentialId || ''} options={[{ value: '', label: '公开仓库，不使用凭证' }, ...credentials.map((credential) => ({ value: credential.id, label: `${credential.name} · ${credential.credentialType === 'ssh_key' ? 'SSH Key' : 'Access Token'}` }))]} onChange={(next) => set('credentialId', next || undefined)} /><label className="field"><span>源码子目录（可选）</span><input value={value.sourceSubdirectory || ''} onChange={(event) => set('sourceSubdirectory', event.target.value)} placeholder="apps/web" /></label></div></section>
-      <section><header><PackageCheck size={17} /><div><strong>构建</strong><span>{selectedMode.detail}</span></div></header><div className="build-mode-grid">{modeOptions.map((item) => <button key={item.value} type="button" className={item.value === value.buildMode ? 'is-active' : ''} onClick={() => set('buildMode', item.value)}><strong>{item.label}</strong><small>{item.detail}</small></button>)}</div>{(value.buildMode === 'static' || value.buildMode === 'custom') && <div className="form-grid"><label className="field"><span>构建命令</span><input value={value.buildCommand || ''} onChange={(event) => set('buildCommand', event.target.value)} placeholder="npm ci && npm run build" /></label><label className="field"><span>产物目录</span><input value={value.outputDirectory || ''} onChange={(event) => set('outputDirectory', event.target.value)} placeholder="dist" /></label></div>}</section>
+      <section><header><PackageCheck size={17} /><div><strong>构建</strong><span>{selectedMode.detail}</span></div></header><div className="build-mode-grid">{modeOptions.map((item) => <button key={item.value} type="button" className={item.value === value.buildMode ? 'is-active' : ''} onClick={() => set('buildMode', item.value)}><strong>{item.label}</strong><small>{item.detail}</small></button>)}</div>{(value.buildMode === 'static' || value.buildMode === 'custom') && <div className="form-grid"><label className="field"><span>构建命令</span><input value={value.buildCommand || ''} onChange={(event) => set('buildCommand', event.target.value)} placeholder="npm ci && npm run build" /></label><label className="field"><span>产物目录</span><input value={value.outputDirectory || ''} onChange={(event) => set('outputDirectory', event.target.value)} placeholder="dist" /></label></div>}<div className="form-grid"><label className="field"><span>构建环境变量</span><textarea rows={3} value={environmentText(value.buildEnvironment)} onChange={(event) => set('buildEnvironment', parseEnvironment(event.target.value))} placeholder="ONNXRUNTIME_NODE_INSTALL_CUDA=skip" spellCheck={false} /></label><SelectMenu label="运行兼容模式" value={value.runtimeProfile} options={[{ value: 'non_root', label: '默认非 root' }, { value: 'root_compatible', label: 'Root 兼容（受限）' }]} onChange={(runtimeProfile) => set('runtimeProfile', runtimeProfile as CreateHostedApplicationPayload['runtimeProfile'])} /></div></section>
       <section><header><Rocket size={17} /><div><strong>部署与访问</strong><span>平台仅生成 Deployment、Service 和 HTTPRoute。</span></div></header><div className="hosting-form-grid"><div className="form-grid"><SelectMenu label="目标集群" value={value.clusterId} options={clusters.map((cluster) => ({ value: cluster.id, label: cluster.name }))} onChange={(next) => set('clusterId', next)} />{capabilities.allowedNamespaces.length ? <SelectMenu label="命名空间" value={value.namespace} options={capabilities.allowedNamespaces.map((namespace) => ({ value: namespace, label: namespace }))} onChange={(next) => set('namespace', next)} /> : <label className="field"><span>命名空间</span><input value={value.namespace} onChange={(event) => set('namespace', event.target.value)} /></label>}<label className="field"><span>容器端口</span><input type="number" min={1} max={65535} value={value.containerPort} onChange={(event) => set('containerPort', Number(event.target.value))} /></label><label className="field"><span>健康检查路径</span><input value={value.healthPath} onChange={(event) => set('healthPath', event.target.value)} /></label></div><div className="form-grid"><div className="field field--read-only"><span>HTTPRoute Host</span><strong>由平台受控 Gateway 配置</strong></div><label className="field"><span>HTTPRoute Path</span><input value={value.routePath} onChange={(event) => set('routePath', event.target.value)} placeholder="/apps/orders-web" /></label><label className="field"><span>副本数</span><input type="number" min={1} max={100} value={value.replicas} onChange={(event) => set('replicas', Number(event.target.value))} /></label><label className="check-field"><input type="checkbox" checked={value.autoDeploy} onChange={(event) => set('autoDeploy', event.target.checked)} /><span><strong>启用自动部署</strong><small>Webhook 配置后可根据分支推送自动触发构建</small></span></label></div></div></section>
     </div>
   </Modal>;
@@ -118,11 +132,45 @@ function CredentialsModal({ open, credentials, onClose, onChanged }: { open: boo
   </Modal>;
 }
 
-function ApplicationDetailModal({ application, onClose, onDeploy, webhook, onConfigureWebhook }: { application?: HostedApplication; onClose: () => void; onDeploy: (application: HostedApplication) => void; webhook?: ApplicationWebhook; onConfigureWebhook: (application: HostedApplication) => Promise<void> }) {
+function CompatibilityModal({ application, onClose, onSaved }: { application?: HostedApplication; onClose: () => void; onSaved: (application: HostedApplication) => void }) {
+  const { pushToast } = useToast();
+  const [environment, setEnvironment] = useState('');
+  const [runtimeProfile, setRuntimeProfile] = useState<'non_root' | 'root_compatible'>('non_root');
+  const [healthScheme, setHealthScheme] = useState<'HTTP' | 'HTTPS'>('HTTP');
+  const [serviceScheme, setServiceScheme] = useState<'HTTP' | 'HTTPS'>('HTTP');
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    setEnvironment(environmentText(application?.buildEnvironment || {}));
+    setRuntimeProfile(application?.runtimeProfile || 'non_root');
+    setHealthScheme(application?.healthScheme || 'HTTP');
+    setServiceScheme(application?.serviceScheme || 'HTTP');
+  }, [application]);
+  const save = async () => {
+    if (!application) return false;
+    const parsed = parseEnvironment(environment);
+    if (environment.split('\n').filter(Boolean).some((line) => !/^[A-Z_][A-Z0-9_]*=.+$/.test(line.trim()))) {
+      pushToast('构建环境变量必须使用 KEY=value 格式', 'error');
+      return false;
+    }
+    setSaving(true);
+    try {
+      onSaved(await api.updateHostedApplication(application.id, { buildEnvironment: parsed, runtimeProfile, healthScheme, serviceScheme }));
+      return true;
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : '无法保存兼容性设置', 'error');
+      return false;
+    } finally { setSaving(false); }
+  };
+  return <Modal open={Boolean(application)} onClose={onClose} title={`${application?.name || ''} · 兼容性`} description="构建变量仅用于镜像构建；Root 兼容仍会禁止提权并丢弃 Linux capabilities。" width="720px" dirty={Boolean(environment !== environmentText(application?.buildEnvironment || {}) || runtimeProfile !== (application?.runtimeProfile || 'non_root') || healthScheme !== (application?.healthScheme || 'HTTP') || serviceScheme !== (application?.serviceScheme || 'HTTP'))} onSave={save} footer={(requestClose) => <><Button variant="ghost" onClick={requestClose}>取消</Button><Button variant="primary" icon={<Settings2 size={16} />} onClick={() => void save()} disabled={saving}>{saving ? '保存中' : '保存设置'}</Button></>}>
+    <div className="hosting-compatibility"><label className="field"><span>构建环境变量</span><textarea rows={6} value={environment} onChange={(event) => setEnvironment(event.target.value)} placeholder="ONNXRUNTIME_NODE_INSTALL_CUDA=skip" spellCheck={false} /><small>每行一个 KEY=value。变量会注入到 Dockerfile 的每个构建阶段，敏感信息请使用 Git 凭证或后续的 Secret 配置。</small></label><div className="form-grid"><SelectMenu label="运行兼容模式" value={runtimeProfile} options={[{ value: 'non_root', label: '默认非 root' }, { value: 'root_compatible', label: 'Root 兼容（受限）' }]} onChange={(value) => setRuntimeProfile(value as 'non_root' | 'root_compatible')} /><SelectMenu label="健康检查协议" value={healthScheme} options={[{ value: 'HTTP', label: 'HTTP' }, { value: 'HTTPS', label: 'HTTPS' }]} onChange={(value) => setHealthScheme(value as 'HTTP' | 'HTTPS')} /><SelectMenu label="网关后端协议" value={serviceScheme} options={[{ value: 'HTTP', label: 'HTTP' }, { value: 'HTTPS', label: 'HTTPS' }]} onChange={(value) => setServiceScheme(value as 'HTTP' | 'HTTPS')} /></div><p className="confirm-copy">Root 兼容用于必须由官方入口以 root 完成初始化的上游镜像。它不会赋予 privileged 权限或 Linux capabilities。</p></div>
+  </Modal>;
+}
+
+function ApplicationDetailModal({ application, onClose, onDeploy, onConfigureCompatibility, webhook, onConfigureWebhook }: { application?: HostedApplication; onClose: () => void; onDeploy: (application: HostedApplication) => void; onConfigureCompatibility: (application: HostedApplication) => void; webhook?: ApplicationWebhook; onConfigureWebhook: (application: HostedApplication) => Promise<void> }) {
   const { pushToast } = useToast(); const [builds, setBuilds] = useState<ApplicationBuild[]>([]); const [loading, setLoading] = useState(false);
   useEffect(() => { if (!application) { setBuilds([]); return; } setLoading(true); api.hostedApplicationBuilds(application.id).then(setBuilds).catch((error) => pushToast(error instanceof Error ? error.message : '无法读取构建记录', 'error')).finally(() => setLoading(false)); }, [application, pushToast]);
   if (!application) return null; const url = `http://${application.routeHost}${application.routePath}`;
-  return <Modal open onClose={onClose} title={application.name} description={`${application.clusterId} · ${application.namespace} · ${application.buildMode}`} width="880px" footer={<><a className="button button--secondary" href={url} target="_blank" rel="noreferrer"><ExternalLink size={16} /><span>访问路由</span></a><Button variant="primary" icon={<Rocket size={16} />} onClick={() => onDeploy(application)}>重新部署</Button></>}>
+  return <Modal open onClose={onClose} title={application.name} description={`${application.clusterId} · ${application.namespace} · ${application.buildMode}`} width="880px" footer={<><a className="button button--secondary" href={url} target="_blank" rel="noreferrer"><ExternalLink size={16} /><span>访问路由</span></a><Button variant="secondary" icon={<Settings2 size={16} />} onClick={() => onConfigureCompatibility(application)}>兼容性</Button><Button variant="primary" icon={<Rocket size={16} />} onClick={() => onDeploy(application)}>重新部署</Button></>}>
     <div className="application-detail"><section className="application-detail__route"><ArrowUpRight size={18} /><div><strong>{application.routeHost}{application.routePath}</strong><small>Gateway: {application.gatewayNamespace}/{application.gatewayName}</small></div><StatusPill status={application.latestBuild?.status === 'succeeded' ? '已发布' : application.latestBuild?.status || '未部署'} /></section><section className="application-webhook"><header><div><Link2 size={16} /><span><strong>GitLab 自动部署</strong><small>{application.autoDeploy ? '匹配的分支或 Tag push 会触发构建。' : '请先在编辑应用时启用自动部署。'}</small></span></div><Button variant="secondary" icon={<KeyRound size={15} />} onClick={() => void onConfigureWebhook(application)}>{application.webhookConfigured ? '轮换密钥' : '生成 Webhook'}</Button></header>{webhook && <div className="application-webhook__secret"><label><span>Webhook URL</span><code>{webhook.url}</code></label><label><span>Secret Token（仅展示一次）</span><code>{webhook.secret}</code></label></div>}</section><section><h3>构建历史</h3>{loading ? <div className="detail-loading"><LoaderCircle className="spin" size={17} />加载构建记录</div> : <div className="build-history">{builds.length ? builds.map((build) => <article key={build.id}><StatusPill status={build.status === 'succeeded' ? '成功' : build.status === 'running' ? '构建中' : build.status === 'failed' ? '失败' : build.status} /><div><strong>{build.gitCommit ? build.gitCommit.slice(0, 12) : build.gitRef}</strong><small>{build.message || '等待 Jenkins 回传状态'}</small></div><time>{formatDate(build.createdAt)}</time>{build.jenkinsBuildUrl && <a href={build.jenkinsBuildUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} /></a>}</article>) : <span className="muted-cell">尚无构建记录</span>}</div>}</section></div>
   </Modal>;
 }

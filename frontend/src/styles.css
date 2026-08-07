@@ -682,6 +682,9 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 0; accent-color: var
 .credential-list strong { font-size: 10px; }
 .credential-list small { color: var(--text-muted); font-size: 8px; }
 .application-detail { display: grid; gap: 15px; }
+.hosting-compatibility { display: grid; gap: 14px; }
+.hosting-compatibility .field { display: grid; gap: 7px; }
+.hosting-compatibility .field small { color: var(--text-muted); font-size: 10px; line-height: 1.5; }
 .application-detail__route { display: grid; grid-template-columns: 25px minmax(0, 1fr) auto; align-items: center; gap: 9px; min-height: 55px; padding: 10px; color: var(--accent); background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border)); border-radius: 8px; }
 .application-detail__route > div { display: grid; min-width: 0; gap: 3px; }
 .application-detail__route strong, .application-detail__route small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

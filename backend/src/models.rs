@@ -82,8 +82,16 @@ pub struct HostedApplicationDocument {
     pub source_subdirectory: Option<String>,
     pub build_command: Option<String>,
     pub output_directory: Option<String>,
+    #[serde(default)]
+    pub build_environment: BTreeMap<String, String>,
+    #[serde(default = "default_runtime_profile")]
+    pub runtime_profile: String,
     pub container_port: i32,
     pub health_path: String,
+    #[serde(default = "default_health_scheme")]
+    pub health_scheme: String,
+    #[serde(default = "default_service_scheme")]
+    pub service_scheme: String,
     pub cluster_id: ObjectId,
     pub namespace: String,
     pub replicas: i32,
@@ -145,8 +153,12 @@ pub struct HostedApplicationResponse {
     pub source_subdirectory: Option<String>,
     pub build_command: Option<String>,
     pub output_directory: Option<String>,
+    pub build_environment: BTreeMap<String, String>,
+    pub runtime_profile: String,
     pub container_port: i32,
     pub health_path: String,
+    pub health_scheme: String,
+    pub service_scheme: String,
     pub cluster_id: String,
     pub namespace: String,
     pub replicas: i32,
@@ -227,10 +239,18 @@ pub struct CreateHostedApplicationRequest {
     pub source_subdirectory: Option<String>,
     pub build_command: Option<String>,
     pub output_directory: Option<String>,
+    #[serde(default)]
+    pub build_environment: BTreeMap<String, String>,
+    #[serde(default = "default_runtime_profile")]
+    pub runtime_profile: String,
     #[serde(default = "default_container_port")]
     pub container_port: i32,
     #[serde(default = "default_health_path")]
     pub health_path: String,
+    #[serde(default = "default_health_scheme")]
+    pub health_scheme: String,
+    #[serde(default = "default_service_scheme")]
+    pub service_scheme: String,
     pub cluster_id: String,
     #[serde(default = "default_namespace")]
     pub namespace: String,
@@ -260,8 +280,12 @@ pub struct UpdateHostedApplicationRequest {
     pub source_subdirectory: Option<String>,
     pub build_command: Option<String>,
     pub output_directory: Option<String>,
+    pub build_environment: Option<BTreeMap<String, String>>,
+    pub runtime_profile: Option<String>,
     pub container_port: Option<i32>,
     pub health_path: Option<String>,
+    pub health_scheme: Option<String>,
+    pub service_scheme: Option<String>,
     pub replicas: Option<i32>,
     pub cpu_request: Option<String>,
     pub memory_request: Option<String>,
@@ -295,11 +319,20 @@ fn default_git_ref() -> String {
 fn default_build_mode() -> String {
     "dockerfile".into()
 }
+fn default_runtime_profile() -> String {
+    "non_root".into()
+}
 fn default_container_port() -> i32 {
     8080
 }
 fn default_health_path() -> String {
     "/".into()
+}
+fn default_health_scheme() -> String {
+    "HTTP".into()
+}
+fn default_service_scheme() -> String {
+    "HTTP".into()
 }
 fn default_namespace() -> String {
     "default".into()

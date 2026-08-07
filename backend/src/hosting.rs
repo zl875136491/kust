@@ -10,7 +10,7 @@ use axum::{
 use futures::TryStreamExt;
 use mongodb::bson::{doc, oid::ObjectId, DateTime};
 use serde_json::json;
-use std::net::IpAddr;
+use std::{collections::BTreeMap, net::IpAddr};
 use url::Url;
 
 use crate::{
@@ -407,6 +407,20 @@ fn validate_health_path(value: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+fn validate_health_scheme(value: &str) -> Result<(), AppError> {
+    if !matches!(value, "HTTP" | "HTTPS") {
+        return Err(AppError::bad_request("health scheme is invalid"));
+    }
+    Ok(())
+}
+
+fn validate_service_scheme(value: &str) -> Result<(), AppError> {
+    if !matches!(value, "HTTP" | "HTTPS") {
+        return Err(AppError::bad_request("service scheme is invalid"));
+    }
+    Ok(())
+}
+
 fn valid_quantity(value: &str) -> bool {
     let value = value.trim();
     !value.is_empty()
@@ -427,6 +441,55 @@ fn validate_resources(request: &CreateHostedApplicationRequest) -> Result<(), Ap
     .any(|value| !valid_quantity(value))
     {
         return Err(AppError::bad_request("resource quantity is invalid"));
+    }
+    Ok(())
+}
+
+fn valid_build_environment_key(value: &str) -> bool {
+    let mut characters = value.bytes();
+    matches!(characters.next(), Some(byte) if byte.is_ascii_uppercase() || byte == b'_')
+        && characters.all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_')
+        && value.len() <= 64
+}
+
+fn valid_build_environment_value(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 256
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(
+                    byte,
+                    b'.' | b'_' | b'/' | b':' | b'=' | b'@' | b'%' | b'+' | b',' | b'-'
+                )
+        })
+}
+
+fn validate_build_environment(environment: &BTreeMap<String, String>) -> Result<(), AppError> {
+    if environment.len() > 32
+        || environment.iter().any(|(key, value)| {
+            !valid_build_environment_key(key)
+                || !valid_build_environment_value(value)
+                || key.starts_with("KUST_")
+                || matches!(
+                    key.as_str(),
+                    "HTTP_PROXY"
+                        | "HTTPS_PROXY"
+                        | "NO_PROXY"
+                        | "GLOBAL_AGENT_HTTP_PROXY"
+                        | "GLOBAL_AGENT_HTTPS_PROXY"
+                )
+        })
+    {
+        return Err(AppError::bad_request(
+            "build environment contains an invalid or reserved value",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_runtime_profile(value: &str) -> Result<(), AppError> {
+    if !matches!(value, "non_root" | "root_compatible") {
+        return Err(AppError::bad_request("runtime profile is invalid"));
     }
     Ok(())
 }
@@ -455,6 +518,8 @@ fn validate_app_request(
     validate_relative_directory(request.output_directory.as_deref(), "output directory")?;
     validate_git_ref(&request.git_ref)?;
     validate_health_path(&request.health_path)?;
+    validate_health_scheme(&request.health_scheme)?;
+    validate_service_scheme(&request.service_scheme)?;
     if !matches!(
         request.build_mode.as_str(),
         "dockerfile" | "buildpack" | "static" | "custom"
@@ -494,6 +559,8 @@ fn validate_app_request(
         ));
     }
     validate_resources(request)?;
+    validate_build_environment(&request.build_environment)?;
+    validate_runtime_profile(&request.runtime_profile)?;
     normalized_route_path(&state.config.app_route_prefix, &request.route_path, &slug)?;
     let host =
         state.config.app_default_route_host.clone().ok_or_else(|| {
@@ -557,8 +624,12 @@ fn app_response(
         source_subdirectory: app.source_subdirectory,
         build_command: app.build_command,
         output_directory: app.output_directory,
+        build_environment: app.build_environment,
+        runtime_profile: app.runtime_profile,
         container_port: app.container_port,
         health_path: app.health_path,
+        health_scheme: app.health_scheme,
+        service_scheme: app.service_scheme,
         cluster_id: app.cluster_id.to_hex(),
         namespace: app.namespace,
         replicas: app.replicas,
@@ -677,8 +748,12 @@ async fn create_application(
         source_subdirectory: request.source_subdirectory,
         build_command: request.build_command,
         output_directory: request.output_directory,
+        build_environment: request.build_environment,
+        runtime_profile: request.runtime_profile,
         container_port: request.container_port,
         health_path: request.health_path,
+        health_scheme: request.health_scheme,
+        service_scheme: request.service_scheme,
         cluster_id,
         namespace: request.namespace,
         replicas: request.replicas,
@@ -819,6 +894,14 @@ async fn update_application(
         };
         validate_health_path(&app.health_path)?;
     }
+    if let Some(v) = request.health_scheme {
+        validate_health_scheme(&v)?;
+        app.health_scheme = v;
+    }
+    if let Some(v) = request.service_scheme {
+        validate_service_scheme(&v)?;
+        app.service_scheme = v;
+    }
     if let Some(v) = request.source_subdirectory {
         validate_source_subdirectory(Some(&v))?;
         app.source_subdirectory = Some(v);
@@ -829,6 +912,14 @@ async fn update_application(
     if let Some(v) = request.output_directory {
         validate_relative_directory(Some(&v), "output directory")?;
         app.output_directory = Some(v);
+    }
+    if let Some(v) = request.build_environment {
+        validate_build_environment(&v)?;
+        app.build_environment = v;
+    }
+    if let Some(v) = request.runtime_profile {
+        validate_runtime_profile(&v)?;
+        app.runtime_profile = v;
     }
     if let Some(v) = request.cpu_request {
         app.cpu_request = v;
@@ -1522,6 +1613,7 @@ async fn build_source(
         "sourceSubdirectory": application.source_subdirectory,
         "buildCommand": application.build_command,
         "outputDirectory": application.output_directory,
+        "buildEnvironment": application.build_environment,
         "credential": credential,
     })))
 }
