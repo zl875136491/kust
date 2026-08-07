@@ -27,8 +27,8 @@ pipeline {
         USER_INFO_HOST = 'tl.cooacloud.com'
         USER_INFO_HOST_IP = '10.32.129.1'
         BUILDKIT_NO_CLIENT_TOKEN = 'true'
-        HTTP_PROXY = 'http://10.17.167.251:7897'
-        HTTPS_PROXY = 'http://10.17.167.251:7897'
+        HTTP_PROXY = 'http://10.32.129.253:10811'
+        HTTPS_PROXY = 'http://10.32.129.253:10811'
         NO_PROXY = 'localhost,127.0.0.1,::1,10.17.158.69,10.17.158.71,10.17.158.118,10.17.158.156,k8s.1oa.com.cn'
     }
 
