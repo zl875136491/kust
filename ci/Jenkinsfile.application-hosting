@@ -43,8 +43,9 @@ set -Eeuo pipefail
 set +x
 test -n "${KUST_SOURCE_TOKEN}"
 resolve_args=()
-if [ -n "${KUST_CALLBACK_RESOLVE}" ]; then
-  resolve_args=(--resolve "${KUST_CALLBACK_RESOLVE}")
+callback_resolve="${KUST_CALLBACK_RESOLVE:-k8s.1oa.com.cn:80:10.17.158.71}"
+if [ -n "${callback_resolve}" ]; then
+  resolve_args=(--resolve "${callback_resolve}")
 fi
 curl --fail --silent --show-error "${resolve_args[@]}" --header "X-Kust-Build-Token: ${KUST_SOURCE_TOKEN}" "${KUST_CALLBACK_URL%/callback}/source" > source.json
 test -s source.json
@@ -156,8 +157,9 @@ test -n "${digest}"
 digest_ref="${IMAGE_REPOSITORY}@${digest}"
 payload="$(jq -n --arg status succeeded --arg commit "${commit}" --arg image "${image}" --arg digest "${digest_ref}" --arg url "${BUILD_URL}" '{status:$status,gitCommit:$commit,imageRef:$image,imageDigestRef:$digest,jenkinsBuildUrl:$url,message:"Image pushed; Kust is applying controlled Kubernetes resources"}')"
 resolve_args=()
-if [ -n "${KUST_CALLBACK_RESOLVE}" ]; then
-  resolve_args=(--resolve "${KUST_CALLBACK_RESOLVE}")
+callback_resolve="${KUST_CALLBACK_RESOLVE:-k8s.1oa.com.cn:80:10.17.158.71}"
+if [ -n "${callback_resolve}" ]; then
+  resolve_args=(--resolve "${callback_resolve}")
 fi
 curl --fail --silent --show-error "${resolve_args[@]}" --header "X-Kust-Build-Token: ${KUST_CALLBACK_TOKEN}" --header "Content-Type: application/json" --data "${payload}" "${KUST_CALLBACK_URL}"
 '''
@@ -174,8 +176,9 @@ if [ -z "${KUST_CALLBACK_URL:-}" ] || [ -z "${KUST_CALLBACK_TOKEN:-}" ]; then
 fi
 payload="$(jq -n --arg status failed --arg message "Jenkins build failed: ${BUILD_URL}" --arg url "${BUILD_URL}" '{status:$status,message:$message,jenkinsBuildUrl:$url}')"
 resolve_args=()
-if [ -n "${KUST_CALLBACK_RESOLVE}" ]; then
-  resolve_args=(--resolve "${KUST_CALLBACK_RESOLVE}")
+callback_resolve="${KUST_CALLBACK_RESOLVE:-k8s.1oa.com.cn:80:10.17.158.71}"
+if [ -n "${callback_resolve}" ]; then
+  resolve_args=(--resolve "${callback_resolve}")
 fi
 curl --silent --show-error "${resolve_args[@]}" --header "X-Kust-Build-Token: ${KUST_CALLBACK_TOKEN}" --header "Content-Type: application/json" --data "${payload}" "${KUST_CALLBACK_URL}" || true
 '''
