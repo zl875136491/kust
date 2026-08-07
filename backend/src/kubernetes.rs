@@ -1642,7 +1642,6 @@ pub async fn apply_hosted_application(
         "containers": [{
             "name": "app", "image": image_digest_ref,
             "ports": [{"containerPort": application.container_port, "name": "http"}],
-            "resources": {"requests": {"cpu": application.cpu_request, "memory": application.memory_request}, "limits": {"cpu": application.cpu_limit, "memory": application.memory_limit}},
             "securityContext": {"allowPrivilegeEscalation": false, "readOnlyRootFilesystem": false, "capabilities": {"drop": ["ALL"]}},
             "readinessProbe": {"httpGet": {"path": application.health_path, "port": "http"}, "initialDelaySeconds": 3, "periodSeconds": 8},
             "livenessProbe": {"httpGet": {"path": application.health_path, "port": "http"}, "initialDelaySeconds": 12, "periodSeconds": 16}
@@ -1757,10 +1756,12 @@ pub async fn wait_for_hosted_application_ready(
             .and_then(|status| status.observed_generation)
             .unwrap_or_default();
         let generation = deployment.metadata.generation.unwrap_or_default();
-        if observed >= generation && ready >= desired && updated >= desired {
-            if hosted_route_accepted(client.clone(), application).await? {
-                return Ok(());
-            }
+        if observed >= generation
+            && ready >= desired
+            && updated >= desired
+            && hosted_route_accepted(client.clone(), application).await?
+        {
+            return Ok(());
         }
         if Instant::now() >= deadline {
             return Err(AppError::upstream(format!(

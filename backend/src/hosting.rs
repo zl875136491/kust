@@ -7,6 +7,7 @@ use axum::{
 use futures::TryStreamExt;
 use mongodb::bson::{doc, oid::ObjectId, DateTime};
 use serde_json::json;
+use std::net::IpAddr;
 use url::Url;
 
 use crate::{
@@ -222,8 +223,23 @@ fn slugify(value: &str) -> String {
     out.trim_matches('-').chars().take(53).collect()
 }
 fn validate_repository(value: &str) -> Result<String, AppError> {
+    let raw = value.trim();
+    let normalized = if !raw.contains("://") {
+        let (identity, path) = raw
+            .split_once(':')
+            .ok_or_else(|| AppError::bad_request("repository URL is invalid"))?;
+        let (username, host) = identity
+            .split_once('@')
+            .ok_or_else(|| AppError::bad_request("repository URL is invalid"))?;
+        if username.is_empty() || host.is_empty() || path.is_empty() || path.starts_with('/') {
+            return Err(AppError::bad_request("repository URL is invalid"));
+        }
+        format!("ssh://{username}@{host}/{path}")
+    } else {
+        raw.to_string()
+    };
     let parsed =
-        Url::parse(value.trim()).map_err(|_| AppError::bad_request("repository URL is invalid"))?;
+        Url::parse(&normalized).map_err(|_| AppError::bad_request("repository URL is invalid"))?;
     if !matches!(parsed.scheme(), "https" | "http" | "ssh" | "git") || parsed.host_str().is_none() {
         return Err(AppError::bad_request(
             "repository URL must use http(s), ssh or git",
@@ -236,7 +252,58 @@ fn validate_repository(value: &str) -> Result<String, AppError> {
             "repository URL must not contain embedded credentials",
         ));
     }
-    Ok(value.trim().to_string())
+    let host = parsed.host_str().unwrap_or_default().trim_end_matches('.');
+    if host.eq_ignore_ascii_case("localhost")
+        || host.eq_ignore_ascii_case("metadata.google.internal")
+        || host.ends_with(".localhost")
+        || host.ends_with(".local")
+    {
+        return Err(AppError::bad_request(
+            "repository host is not allowed for application builds",
+        ));
+    }
+    if let Ok(address) = host.parse::<IpAddr>() {
+        let blocked = match address {
+            IpAddr::V4(value) => {
+                value.is_loopback()
+                    || value.is_private()
+                    || value.is_link_local()
+                    || value.is_unspecified()
+                    || value.is_multicast()
+                    || value.octets() == [169, 254, 169, 254]
+            }
+            IpAddr::V6(value) => {
+                value.is_loopback()
+                    || value.is_unspecified()
+                    || value.is_multicast()
+                    || value.is_unique_local()
+                    || value.is_unicast_link_local()
+            }
+        };
+        if blocked {
+            return Err(AppError::bad_request(
+                "repository host must not point to a private or link-local address",
+            ));
+        }
+    }
+    Ok(normalized)
+}
+
+fn validate_repository_host(host: &str, allowed_hosts: &[String]) -> Result<(), AppError> {
+    if allowed_hosts.is_empty() {
+        return Ok(());
+    }
+    let normalized = host.trim_end_matches('.').to_ascii_lowercase();
+    if allowed_hosts.iter().any(|candidate| {
+        let candidate = candidate.trim_end_matches('.').to_ascii_lowercase();
+        normalized == candidate || normalized.ends_with(&format!(".{candidate}"))
+    }) {
+        Ok(())
+    } else {
+        Err(AppError::bad_request(
+            "repository host is outside the platform allowlist",
+        ))
+    }
 }
 
 fn valid_hostname(value: &str) -> bool {
@@ -361,6 +428,11 @@ fn validate_app_request(
         ));
     }
     let repository_url = validate_repository(&request.repository_url)?;
+    let repository_host = Url::parse(&repository_url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_string))
+        .ok_or_else(|| AppError::bad_request("repository host is invalid"))?;
+    validate_repository_host(&repository_host, &state.config.app_allowed_git_hosts)?;
     validate_source_subdirectory(request.source_subdirectory.as_deref())?;
     validate_relative_directory(request.output_directory.as_deref(), "output directory")?;
     validate_git_ref(&request.git_ref)?;
@@ -854,10 +926,16 @@ async fn rollback_application(
     let image = build.image_digest_ref.clone().unwrap();
     let client = state.kube_client(&app.cluster_id.to_hex()).await?;
     kubernetes::apply_hosted_application(
-        client,
+        client.clone(),
         &app,
         &image,
         state.config.app_image_pull_secret.as_deref(),
+    )
+    .await?;
+    kubernetes::wait_for_hosted_application_ready(
+        state.kube_client(&app.cluster_id.to_hex()).await?,
+        &app,
+        std::time::Duration::from_secs(state.config.app_rollout_timeout_seconds),
     )
     .await?;
     write_audit(
@@ -1198,16 +1276,24 @@ async fn build_callback(
             .image_digest_ref
             .as_deref()
             .ok_or_else(|| AppError::bad_request("successful build must include image digest"))?;
-        if !image.contains("@sha256:") {
-            return Err(AppError::bad_request(
-                "image must be an immutable digest reference",
-            ));
-        }
         let app = state
             .hosted_applications
             .find_one(doc! {"_id": build.application_id})
             .await?
             .ok_or_else(|| AppError::not_found("application was not found"))?;
+        let expected_prefix = state
+            .config
+            .app_harbor_repository_prefix
+            .as_deref()
+            .map(|prefix| format!("{}/{}@sha256:", prefix.trim_end_matches('/'), app.slug))
+            .ok_or_else(|| {
+                AppError::conflict("application Harbor repository prefix is not configured")
+            })?;
+        if !valid_digest_reference(image, &expected_prefix) {
+            return Err(AppError::bad_request(
+                "image must be an immutable digest from this application's Harbor repository",
+            ));
+        }
         let client = state.kube_client(&app.cluster_id.to_hex()).await?;
         if let Err(error) = kubernetes::apply_hosted_application(
             client,
@@ -1276,6 +1362,14 @@ async fn build_callback(
     )
     .await?;
     Ok(Json(ApplicationBuildResponse::from(build)))
+}
+
+fn valid_digest_reference(value: &str, expected_prefix: &str) -> bool {
+    value.starts_with(expected_prefix)
+        && value.len() == expected_prefix.len() + 64
+        && value[expected_prefix.len()..]
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
 }
 
 async fn build_source(
@@ -1391,8 +1485,8 @@ fn require_build_callback_token(
 #[cfg(test)]
 mod tests {
     use super::{
-        slugify, valid_dns_label, validate_git_ref, validate_relative_directory,
-        validate_repository,
+        slugify, valid_digest_reference, valid_dns_label, validate_git_ref,
+        validate_relative_directory, validate_repository,
     };
 
     #[test]
@@ -1404,11 +1498,27 @@ mod tests {
 
     #[test]
     fn accepts_supported_repository_urls_without_embedded_secrets() {
-        assert!(validate_repository("https://gitlab.local/team/service.git").is_ok());
-        assert!(validate_repository("ssh://git@gitlab.local/team/service.git").is_ok());
-        assert!(validate_repository("https://token@gitlab.local/team/service.git").is_err());
-        assert!(validate_repository("https://token:secret@gitlab.local/team/service.git").is_err());
+        assert!(validate_repository("https://gitlab.example.com/team/service.git").is_ok());
+        assert!(validate_repository("ssh://git@gitlab.example.com/team/service.git").is_ok());
+        assert_eq!(
+            validate_repository("git@gitlab.example.com:team/service.git").unwrap(),
+            "ssh://git@gitlab.example.com/team/service.git"
+        );
+        assert!(validate_repository("https://token@gitlab.example.com/team/service.git").is_err());
+        assert!(
+            validate_repository("https://token:secret@gitlab.example.com/team/service.git")
+                .is_err()
+        );
         assert!(validate_repository("file:///tmp/service").is_err());
+        assert!(validate_repository("https://127.0.0.1/team/service.git").is_err());
+        assert!(validate_repository("https://gitlab.local/team/service.git").is_err());
+    }
+
+    #[test]
+    fn callback_images_are_pinned_to_the_application_repository() {
+        let prefix = "10.17.158.118/kust-apps/demo@sha256:";
+        assert!(valid_digest_reference("10.17.158.118/kust-apps/demo@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", prefix));
+        assert!(!valid_digest_reference("10.17.158.118/kust-apps/other@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", prefix));
     }
 
     #[test]

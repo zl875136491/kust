@@ -323,6 +323,7 @@ npm run dev
 | `KUST_APP_HARBOR_REPOSITORY_PREFIX` | 无 | 托管应用镜像前缀，例如 `harbor.internal/kust-apps` |
 | `KUST_APP_IMAGE_PULL_SECRET` | 无 | 平台预置在允许命名空间中的 Harbor 拉取 Secret 名称 |
 | `KUST_APP_ALLOWED_NAMESPACES` | 无 | 逗号分隔的托管应用命名空间白名单；为空时不额外限制 |
+| `KUST_APP_ALLOWED_GIT_HOSTS` | 无 | 可选的 Git 主机名白名单；为空时仍拒绝 localhost、私有、链路本地和 metadata 地址 |
 | `KUST_APP_ROLLOUT_TIMEOUT_SECONDS` | `180` | Deployment 与 HTTPRoute 就绪的最长等待时间，范围 30-900 秒 |
 | `RUST_LOG` | `kust_api=info,tower_http=info` | Rust tracing 过滤器 |
 | `VITE_API_URL` | 当前站点的 `<base>/api` | 前端编译时 API 根地址 |
@@ -353,7 +354,7 @@ Kust 是控制面：应用定义、Git 凭证元数据、构建记录和审计�
 | `static` | Vite、React、Vue 等静态站点 | 执行构建命令并封装为受控 Nginx 镜像 |
 | `custom` | 非标准静态构建 | 仅运行填写的构建命令并封装静态产物 |
 
-静态镜像固定监听 `8080`，与 Kust 生成的 Service、健康检查和 HTTPRoute 后端端口一致。用户不能提交任意 Kubernetes YAML、ServiceAccount、HostPath、特权容器、Secret 挂载、Gateway 或集群范围资源。
+静态镜像固定监听 `8080`，与 Kust 生成的 Service、健康检查和 HTTPRoute 后端端口一致。应用资源不设置用户可控的 CPU/内存 request/limit，遵循平台集群统一调度策略。用户不能提交任意 Kubernetes YAML、ServiceAccount、HostPath、特权容器、Secret 挂载、Gateway 或集群范围资源。
 
 ### Git 凭证与私有仓库
 

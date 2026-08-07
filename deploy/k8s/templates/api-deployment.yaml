@@ -76,6 +76,8 @@ spec:
               value: kust-harbor
             - name: KUST_APP_ALLOWED_NAMESPACES
               value: custom-apps
+            - name: KUST_APP_ALLOWED_GIT_HOSTS
+              value: gitlab.1oa.com.cn,github.com,gitlab.com
             - name: KUST_APP_CALLBACK_BASE_URL
               value: http://k8s.1oa.com.cn__BASE_PATH__
             - name: KUST_APP_ROLLOUT_TIMEOUT_SECONDS
