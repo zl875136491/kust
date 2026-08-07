@@ -72,7 +72,7 @@ if [ "${kind}" = "ssh_key" ]; then
   printf '%s' "${secret}" > "${key}"
   chmod 600 "${key}"
   export GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new -i ${key}"
-  git clone --no-checkout "${repo}" app
+  git clone --depth=1 --no-checkout "${repo}" app
 elif [ "${kind}" = "token" ]; then
   askpass="$(mktemp)"
   trap 'rm -f "${askpass}"' EXIT
@@ -84,9 +84,9 @@ EOF
   export KUST_GIT_SECRET="${secret}"
   export GIT_ASKPASS="${askpass}"
   export GIT_TERMINAL_PROMPT=0
-  git clone --no-checkout "https://${username}@${repo#*://}" app
+  git clone --depth=1 --no-checkout "https://${username}@${repo#*://}" app
 else
-  git clone --no-checkout "${repo}" app
+  git clone --depth=1 --no-checkout "${repo}" app
 fi
 cd app
 git fetch --depth=1 origin "${ref}"
