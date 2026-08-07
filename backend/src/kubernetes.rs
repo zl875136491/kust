@@ -1637,8 +1637,16 @@ pub async fn apply_hosted_application(
         "kust.dev/application-id": application.id.to_hex(),
         "kust.dev/application-slug": application.slug,
     });
+    // Traefik's Gateway provider selects HTTPS upstream transport from a Service
+    // port whose name starts with "https". Keep the Pod, Service, and probes
+    // on the same named port so an HTTPS backend is routed consistently.
+    let port_name = if application.service_scheme == "HTTPS" {
+        "https"
+    } else {
+        "http"
+    };
     let probe = json!({
-        "httpGet": {"path": application.health_path, "port": "http", "scheme": application.health_scheme}
+        "httpGet": {"path": application.health_path, "port": port_name, "scheme": application.health_scheme}
     });
     let security_context = if application.runtime_profile == "root_compatible" {
         // Some supported upstream images, including LinuxServer images, use an
@@ -1650,7 +1658,7 @@ pub async fn apply_hosted_application(
     };
     let mut container = json!({
         "name": "app", "image": image_digest_ref,
-        "ports": [{"containerPort": application.container_port, "name": "http"}],
+        "ports": [{"containerPort": application.container_port, "name": port_name}],
         "readinessProbe": {"httpGet": probe["httpGet"], "periodSeconds": 8},
         "livenessProbe": {"httpGet": probe["httpGet"], "periodSeconds": 16},
         "startupProbe": {"httpGet": probe["httpGet"], "periodSeconds": 5, "failureThreshold": 30}
@@ -1686,7 +1694,7 @@ pub async fn apply_hosted_application(
     let service = json!({
         "apiVersion": "v1", "kind": "Service",
         "metadata": {"name": application.slug, "namespace": application.namespace, "labels": labels},
-        "spec": {"selector": {"app.kubernetes.io/name": application.slug}, "ports": [{"name": "http", "port": application.container_port, "targetPort": "http", "appProtocol": application.service_scheme.to_lowercase()}]}
+        "spec": {"selector": {"app.kubernetes.io/name": application.slug}, "ports": [{"name": port_name, "port": application.container_port, "targetPort": port_name, "appProtocol": application.service_scheme.to_lowercase()}]}
     });
     let route = json!({
         "apiVersion": "gateway.networking.k8s.io/v1", "kind": "HTTPRoute",
