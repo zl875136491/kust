@@ -160,6 +160,9 @@ curl --fail --silent --show-error --header "X-Kust-Build-Token: ${KUST_CALLBACK_
     failure {
       sh '''#!/usr/bin/env bash
 set +e
+if [ -z "${KUST_CALLBACK_URL:-}" ] || [ -z "${KUST_CALLBACK_TOKEN:-}" ]; then
+  exit 0
+fi
 payload="$(jq -n --arg status failed --arg message "Jenkins build failed: ${BUILD_URL}" --arg url "${BUILD_URL}" '{status:$status,message:$message,jenkinsBuildUrl:$url}')"
 curl --silent --show-error --header "X-Kust-Build-Token: ${KUST_CALLBACK_TOKEN}" --header "Content-Type: application/json" --data "${payload}" "${KUST_CALLBACK_URL}" || true
 '''
