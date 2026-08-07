@@ -118,6 +118,22 @@ build_args=(
   --build-arg "GLOBAL_AGENT_HTTP_PROXY=${HTTP_PROXY}"
   --build-arg "GLOBAL_AGENT_HTTPS_PROXY=${HTTPS_PROXY}"
 )
+docker_build_with_retries() {
+  local attempt
+  # Upstream Dockerfiles often install packages from public mirrors. Retry the
+  # complete build once for transient proxy and mirror failures, while keeping
+  # deterministic Dockerfile failures visible in the final Jenkins log.
+  for attempt in 1 2; do
+    if docker build "$@"; then
+      return 0
+    fi
+    if [ "${attempt}" -lt 2 ]; then
+      printf 'Docker build attempt %s failed; retrying after a short backoff.\n' "${attempt}" >&2
+      sleep 12
+    fi
+  done
+  return 1
+}
 while IFS= read -r key && IFS= read -r value; do
   [ -n "${key}" ] || continue
   build_args+=(--build-arg "${key}=${value}")
@@ -151,7 +167,7 @@ case "${BUILD_MODE}" in
     dockerfile="$(mktemp "${WORKSPACE_TMP:-/tmp}/kust-Dockerfile.XXXXXX")"
     render_dockerfile "${work}/Dockerfile" "${dockerfile}"
     trap 'rm -f "${dockerfile}" "${dockerfile}.env"' EXIT
-    docker build --pull --provenance=false "${build_args[@]}" --file "${dockerfile}" --tag "${image}" "${work}"
+    docker_build_with_retries --pull --provenance=false "${build_args[@]}" --file "${dockerfile}" --tag "${image}" "${work}"
     ;;
   buildpack) pack build "${image}" --path "${work}" --builder paketobuildpacks/builder-jammy-base ;;
   static|custom)
