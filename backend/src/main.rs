@@ -5,6 +5,7 @@ mod config;
 mod crypto;
 mod db;
 mod error;
+mod hosting;
 mod kubernetes;
 mod models;
 mod routes;
@@ -74,6 +75,9 @@ async fn main() {
         user_settings: database.collection("user_settings"),
         platform_settings: database.collection("platform_settings"),
         notifications: database.collection("notifications"),
+        git_credentials: database.collection("git_credentials"),
+        hosted_applications: database.collection("hosted_applications"),
+        application_builds: database.collection("application_builds"),
         platform_config: Arc::new(tokio::sync::RwLock::new(platform_config)),
         database,
         secrets: SecretBox::new(&config.encryption_key),

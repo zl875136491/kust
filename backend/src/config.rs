@@ -15,6 +15,20 @@ pub struct AppConfig {
     pub oa_springboard_app: String,
     pub frontend_url: String,
     pub expose_local_reset_codes: bool,
+    pub app_hosting_enabled: bool,
+    pub jenkins_url: Option<String>,
+    pub jenkins_user: Option<String>,
+    pub jenkins_api_token: Option<String>,
+    pub jenkins_app_job: String,
+    pub app_default_gateway_name: Option<String>,
+    pub app_default_gateway_namespace: Option<String>,
+    pub app_default_route_host: Option<String>,
+    pub app_route_prefix: String,
+    pub app_harbor_repository_prefix: Option<String>,
+    pub app_image_pull_secret: Option<String>,
+    pub app_allowed_namespaces: Vec<String>,
+    pub app_callback_base_url: Option<String>,
+    pub app_rollout_timeout_seconds: u64,
 }
 
 impl AppConfig {
@@ -83,7 +97,50 @@ impl AppConfig {
             oa_springboard_app: configured_value("SPRINGBOARD_APP", &["SPRINGBOARD_APP"], &oa_file)
                 .unwrap_or_else(|| "kust".into()),
             expose_local_reset_codes: env_bool("KUST_EXPOSE_LOCAL_RESET_CODES", false),
+            app_hosting_enabled: env_bool("KUST_APP_HOSTING_ENABLED", false),
+            jenkins_url: optional_env("KUST_JENKINS_URL"),
+            jenkins_user: optional_env("KUST_JENKINS_USER"),
+            jenkins_api_token: optional_env("KUST_JENKINS_API_TOKEN"),
+            jenkins_app_job: env::var("KUST_JENKINS_APP_JOB")
+                .unwrap_or_else(|_| "kust_customer_apps/application-hosting".into()),
+            app_default_gateway_name: optional_env("KUST_APP_DEFAULT_GATEWAY_NAME"),
+            app_default_gateway_namespace: optional_env("KUST_APP_DEFAULT_GATEWAY_NAMESPACE"),
+            app_default_route_host: optional_env("KUST_APP_DEFAULT_ROUTE_HOST"),
+            app_route_prefix: route_prefix_from_env(),
+            app_harbor_repository_prefix: optional_env("KUST_APP_HARBOR_REPOSITORY_PREFIX"),
+            app_image_pull_secret: optional_env("KUST_APP_IMAGE_PULL_SECRET"),
+            app_allowed_namespaces: csv_env("KUST_APP_ALLOWED_NAMESPACES"),
+            app_callback_base_url: optional_env("KUST_APP_CALLBACK_BASE_URL"),
+            app_rollout_timeout_seconds: env_u64("KUST_APP_ROLLOUT_TIMEOUT_SECONDS", 180)?
+                .clamp(30, 900),
         })
+    }
+}
+
+fn optional_env(key: &str) -> Option<String> {
+    env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn csv_env(key: &str) -> Vec<String> {
+    env::var(key)
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn route_prefix_from_env() -> String {
+    let raw = env::var("KUST_APP_ROUTE_PREFIX").unwrap_or_else(|_| "/apps".into());
+    let normalized = raw.trim().trim_matches('/');
+    if normalized.is_empty() {
+        "/apps".into()
+    } else {
+        format!("/{normalized}")
     }
 }
 

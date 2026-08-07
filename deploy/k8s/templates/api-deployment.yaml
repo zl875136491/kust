@@ -60,6 +60,46 @@ spec:
               value: http://k8s.1oa.com.cn__BASE_PATH__
             - name: KUST_EXPOSE_LOCAL_RESET_CODES
               value: "false"
+            - name: KUST_APP_HOSTING_ENABLED
+              value: "true"
+            - name: KUST_APP_DEFAULT_GATEWAY_NAME
+              value: k8s-gateway
+            - name: KUST_APP_DEFAULT_GATEWAY_NAMESPACE
+              value: traefik-system
+            - name: KUST_APP_DEFAULT_ROUTE_HOST
+              value: k8s.1oa.com.cn
+            - name: KUST_APP_ROUTE_PREFIX
+              value: /apps
+            - name: KUST_APP_HARBOR_REPOSITORY_PREFIX
+              value: 10.17.158.118/kust-apps
+            - name: KUST_APP_IMAGE_PULL_SECRET
+              value: kust-harbor
+            - name: KUST_APP_ALLOWED_NAMESPACES
+              value: custom-apps
+            - name: KUST_APP_CALLBACK_BASE_URL
+              value: http://k8s.1oa.com.cn__BASE_PATH__
+            - name: KUST_APP_ROLLOUT_TIMEOUT_SECONDS
+              value: "180"
+            - name: KUST_JENKINS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: __RUNTIME_SECRET__
+                  key: jenkins-url
+                  optional: true
+            - name: KUST_JENKINS_APP_JOB
+              value: kust_customer_apps/application-hosting
+            - name: KUST_JENKINS_USER
+              valueFrom:
+                secretKeyRef:
+                  name: __RUNTIME_SECRET__
+                  key: jenkins-user
+                  optional: true
+            - name: KUST_JENKINS_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: __RUNTIME_SECRET__
+                  key: jenkins-api-token
+                  optional: true
             - name: RUST_LOG
               value: kust_api=info,tower_http=info
           volumeMounts:

@@ -21,13 +21,16 @@ use kube::{
 };
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    time::{sleep, Duration, Instant},
+};
 
 use crate::{
     error::AppError,
     models::{
-        ApplyResourceResponse, OverviewResponse, ResourceListResponse, ResourceReference,
-        ResourceRow, StatusCount,
+        ApplyResourceResponse, HostedApplicationDocument, OverviewResponse, ResourceListResponse,
+        ResourceReference, ResourceRow, StatusCount,
     },
 };
 
@@ -1617,6 +1620,212 @@ pub async fn apply_yaml(
         name: applied.name_any(),
         namespace: applied.namespace(),
     })
+}
+
+pub async fn apply_hosted_application(
+    client: Client,
+    application: &HostedApplicationDocument,
+    image_digest_ref: &str,
+    image_pull_secret: Option<&str>,
+) -> Result<(), AppError> {
+    for kind in ["deployments", "services", "httproutes"] {
+        ensure_hosted_resource_ownership(client.clone(), application, kind).await?;
+    }
+    let labels = json!({
+        "app.kubernetes.io/name": application.slug,
+        "app.kubernetes.io/managed-by": "kust",
+        "kust.dev/application-id": application.id.to_hex(),
+        "kust.dev/application-slug": application.slug,
+    });
+    let mut pod_spec = json!({
+        "securityContext": {"runAsNonRoot": true},
+        "containers": [{
+            "name": "app", "image": image_digest_ref,
+            "ports": [{"containerPort": application.container_port, "name": "http"}],
+            "resources": {"requests": {"cpu": application.cpu_request, "memory": application.memory_request}, "limits": {"cpu": application.cpu_limit, "memory": application.memory_limit}},
+            "securityContext": {"allowPrivilegeEscalation": false, "readOnlyRootFilesystem": false, "capabilities": {"drop": ["ALL"]}},
+            "readinessProbe": {"httpGet": {"path": application.health_path, "port": "http"}, "initialDelaySeconds": 3, "periodSeconds": 8},
+            "livenessProbe": {"httpGet": {"path": application.health_path, "port": "http"}, "initialDelaySeconds": 12, "periodSeconds": 16}
+        }]
+    });
+    if let Some(name) = image_pull_secret {
+        pod_spec["imagePullSecrets"] = json!([{"name": name}]);
+    }
+    let deployment = json!({
+        "apiVersion": "apps/v1", "kind": "Deployment",
+        "metadata": {"name": application.slug, "namespace": application.namespace, "labels": labels},
+        "spec": {
+            "replicas": application.replicas,
+            "selector": {"matchLabels": {"app.kubernetes.io/name": application.slug}},
+            "template": {
+                "metadata": {"labels": labels},
+                "spec": pod_spec
+            }
+        }
+    });
+    let service = json!({
+        "apiVersion": "v1", "kind": "Service",
+        "metadata": {"name": application.slug, "namespace": application.namespace, "labels": labels},
+        "spec": {"selector": {"app.kubernetes.io/name": application.slug}, "ports": [{"name": "http", "port": application.container_port, "targetPort": "http"}]}
+    });
+    let route = json!({
+        "apiVersion": "gateway.networking.k8s.io/v1", "kind": "HTTPRoute",
+        "metadata": {"name": application.slug, "namespace": application.namespace, "labels": labels},
+        "spec": {
+            "parentRefs": [{"name": application.gateway_name, "namespace": application.gateway_namespace}],
+            "hostnames": [application.route_host],
+            "rules": [{
+                "matches": [{"path": {"type": "PathPrefix", "value": application.route_path}}],
+                "filters": [{"type": "URLRewrite", "urlRewrite": {"path": {"type": "ReplacePrefixMatch", "replacePrefixMatch": "/"}}}],
+                "backendRefs": [{"name": application.slug, "port": application.container_port}]
+            }]
+        }
+    });
+    for manifest in [deployment, service, route] {
+        let yaml = serde_yaml::to_string(&manifest).map_err(|error| {
+            AppError::internal(format!(
+                "unable to render hosted application manifest: {error}"
+            ))
+        })?;
+        apply_yaml(client.clone(), &yaml, Some(&application.namespace)).await?;
+    }
+    Ok(())
+}
+
+async fn ensure_hosted_resource_ownership(
+    client: Client,
+    application: &HostedApplicationDocument,
+    kind: &str,
+) -> Result<(), AppError> {
+    match resource_yaml(
+        client,
+        kind,
+        Some(&application.namespace),
+        &application.slug,
+    )
+    .await
+    {
+        Ok(yaml) => {
+            let value: Value = serde_yaml::from_str(&yaml).map_err(|error| {
+                AppError::internal(format!(
+                    "unable to inspect existing hosted application resource: {error}"
+                ))
+            })?;
+            let owner = value
+                .get("metadata")
+                .and_then(|metadata| metadata.get("labels"))
+                .and_then(|labels| labels.get("kust.dev/application-id"))
+                .and_then(Value::as_str);
+            if owner != Some(application.id.to_hex().as_str()) {
+                return Err(AppError::conflict(format!(
+                    "{kind}/{} already exists and is not managed by this hosted application",
+                    application.slug
+                )));
+            }
+            Ok(())
+        }
+        Err(error)
+            if error.to_string().contains("404") || error.to_string().contains("not found") =>
+        {
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
+}
+
+pub async fn wait_for_hosted_application_ready(
+    client: Client,
+    application: &HostedApplicationDocument,
+    timeout: Duration,
+) -> Result<(), AppError> {
+    let deadline = Instant::now() + timeout;
+    let deployment_api: Api<Deployment> = Api::namespaced(client.clone(), &application.namespace);
+
+    loop {
+        let deployment = deployment_api.get(&application.slug).await?;
+        let desired = deployment
+            .spec
+            .as_ref()
+            .and_then(|spec| spec.replicas)
+            .unwrap_or(1);
+        let status = deployment.status.as_ref();
+        let ready = status.and_then(|status| status.ready_replicas).unwrap_or(0);
+        let updated = status
+            .and_then(|status| status.updated_replicas)
+            .unwrap_or(0);
+        let observed = status
+            .and_then(|status| status.observed_generation)
+            .unwrap_or_default();
+        let generation = deployment.metadata.generation.unwrap_or_default();
+        if observed >= generation && ready >= desired && updated >= desired {
+            if hosted_route_accepted(client.clone(), application).await? {
+                return Ok(());
+            }
+        }
+        if Instant::now() >= deadline {
+            return Err(AppError::upstream(format!(
+                "hosted application did not become ready within {} seconds",
+                timeout.as_secs()
+            )));
+        }
+        sleep(Duration::from_secs(3)).await;
+    }
+}
+
+async fn hosted_route_accepted(
+    client: Client,
+    application: &HostedApplicationDocument,
+) -> Result<bool, AppError> {
+    let discovery = Discovery::new(client.clone()).run().await?;
+    let gvk = GroupVersionKind::gvk("gateway.networking.k8s.io", "v1", "HTTPRoute");
+    let (resource, _) = discovery
+        .resolve_gvk(&gvk)
+        .ok_or_else(|| AppError::bad_request("the cluster does not expose HTTPRoute"))?;
+    let route: DynamicObject = Api::namespaced_with(client, &application.namespace, &resource)
+        .get(&application.slug)
+        .await?;
+    let parents = route
+        .data
+        .get("status")
+        .and_then(|status| status.get("parents"))
+        .and_then(Value::as_array);
+    Ok(parents.is_some_and(|parents| {
+        parents.iter().any(|parent| {
+            parent
+                .get("conditions")
+                .and_then(Value::as_array)
+                .is_some_and(|conditions| {
+                    conditions.iter().any(|condition| {
+                        condition.get("type").and_then(Value::as_str) == Some("Accepted")
+                            && condition.get("status").and_then(Value::as_str) == Some("True")
+                    })
+                })
+        })
+    }))
+}
+
+pub async fn delete_hosted_application(
+    client: Client,
+    application: &HostedApplicationDocument,
+) -> Result<(), AppError> {
+    for kind in ["httproutes", "services", "deployments"] {
+        ensure_hosted_resource_ownership(client.clone(), application, kind).await?;
+        match delete_resource(
+            client.clone(),
+            kind,
+            Some(&application.namespace),
+            &application.slug,
+        )
+        .await
+        {
+            Ok(()) => {}
+            Err(error)
+                if error.to_string().contains("404") || error.to_string().contains("not found") => {
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
 }
 
 #[allow(dead_code)]

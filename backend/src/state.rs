@@ -12,7 +12,8 @@ use crate::{
     crypto::SecretBox,
     error::AppError,
     models::{
-        AuthCodeDocument, ClusterDocument, PlatformSettingsDocument, ResourceSnapshotDocument,
+        ApplicationBuildDocument, AuthCodeDocument, ClusterDocument, GitCredentialDocument,
+        HostedApplicationDocument, PlatformSettingsDocument, ResourceSnapshotDocument,
         RoleDocument, SessionDocument, TrustedDeviceDocument, UserDocument, UserSettingsDocument,
     },
 };
@@ -40,6 +41,9 @@ pub struct AppState {
     pub user_settings: Collection<UserSettingsDocument>,
     pub platform_settings: Collection<PlatformSettingsDocument>,
     pub notifications: Collection<crate::models::NotificationDocument>,
+    pub git_credentials: Collection<GitCredentialDocument>,
+    pub hosted_applications: Collection<HostedApplicationDocument>,
+    pub application_builds: Collection<ApplicationBuildDocument>,
     pub platform_config: Arc<tokio::sync::RwLock<PlatformSettingsDocument>>,
     pub secrets: SecretBox,
     pub config: Arc<AppConfig>,

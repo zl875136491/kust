@@ -30,6 +30,297 @@ pub struct ClusterDocument {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GitCredentialDocument {
+    #[serde(rename = "_id")]
+    pub id: ObjectId,
+    pub owner_user_id: ObjectId,
+    pub name: String,
+    pub credential_type: String,
+    pub username: Option<String>,
+    pub secret_encrypted: String,
+    pub created_at: DateTime,
+    pub updated_at: DateTime,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCredentialResponse {
+    pub id: String,
+    pub name: String,
+    pub credential_type: String,
+    pub username: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl From<GitCredentialDocument> for GitCredentialResponse {
+    fn from(value: GitCredentialDocument) -> Self {
+        Self {
+            id: value.id.to_hex(),
+            name: value.name,
+            credential_type: value.credential_type,
+            username: value.username,
+            created_at: value.created_at.try_to_rfc3339_string().unwrap_or_default(),
+            updated_at: value.updated_at.try_to_rfc3339_string().unwrap_or_default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HostedApplicationDocument {
+    #[serde(rename = "_id")]
+    pub id: ObjectId,
+    pub owner_user_id: ObjectId,
+    #[serde(default)]
+    pub member_user_ids: Vec<ObjectId>,
+    pub name: String,
+    pub slug: String,
+    pub repository_url: String,
+    pub git_ref: String,
+    pub credential_id: Option<ObjectId>,
+    pub build_mode: String,
+    pub source_subdirectory: Option<String>,
+    pub build_command: Option<String>,
+    pub output_directory: Option<String>,
+    pub container_port: i32,
+    pub health_path: String,
+    pub cluster_id: ObjectId,
+    pub namespace: String,
+    pub replicas: i32,
+    pub cpu_request: String,
+    pub memory_request: String,
+    pub cpu_limit: String,
+    pub memory_limit: String,
+    pub route_host: String,
+    pub route_path: String,
+    pub gateway_name: String,
+    pub gateway_namespace: String,
+    #[serde(default)]
+    pub auto_deploy: bool,
+    #[serde(default)]
+    pub webhook_secret_encrypted: Option<String>,
+    pub created_at: DateTime,
+    pub updated_at: DateTime,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ApplicationBuildDocument {
+    #[serde(rename = "_id")]
+    pub id: ObjectId,
+    pub application_id: ObjectId,
+    pub triggered_by_user_id: Option<ObjectId>,
+    pub git_commit: Option<String>,
+    pub git_ref: String,
+    pub status: String,
+    pub jenkins_build_url: Option<String>,
+    pub image_ref: Option<String>,
+    pub image_digest_ref: Option<String>,
+    pub message: Option<String>,
+    #[serde(default)]
+    pub source_lease_token_hash: Option<String>,
+    #[serde(default)]
+    pub source_lease_expires_at: Option<DateTime>,
+    #[serde(default)]
+    pub source_lease_consumed_at: Option<DateTime>,
+    #[serde(default)]
+    pub callback_token_hash: Option<String>,
+    #[serde(default)]
+    pub callback_token_expires_at: Option<DateTime>,
+    pub created_at: DateTime,
+    pub started_at: Option<DateTime>,
+    pub finished_at: Option<DateTime>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostedApplicationResponse {
+    pub id: String,
+    pub owner_user_id: String,
+    pub name: String,
+    pub slug: String,
+    pub repository_url: String,
+    pub git_ref: String,
+    pub credential_id: Option<String>,
+    pub build_mode: String,
+    pub source_subdirectory: Option<String>,
+    pub build_command: Option<String>,
+    pub output_directory: Option<String>,
+    pub container_port: i32,
+    pub health_path: String,
+    pub cluster_id: String,
+    pub namespace: String,
+    pub replicas: i32,
+    pub cpu_request: String,
+    pub memory_request: String,
+    pub cpu_limit: String,
+    pub memory_limit: String,
+    pub route_host: String,
+    pub route_path: String,
+    pub gateway_name: String,
+    pub gateway_namespace: String,
+    pub auto_deploy: bool,
+    pub webhook_configured: bool,
+    pub created_at: String,
+    pub updated_at: String,
+    pub latest_build: Option<ApplicationBuildResponse>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplicationBuildResponse {
+    pub id: String,
+    pub application_id: String,
+    pub git_commit: Option<String>,
+    pub git_ref: String,
+    pub status: String,
+    pub jenkins_build_url: Option<String>,
+    pub image_ref: Option<String>,
+    pub image_digest_ref: Option<String>,
+    pub message: Option<String>,
+    pub created_at: String,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+}
+
+impl From<ApplicationBuildDocument> for ApplicationBuildResponse {
+    fn from(value: ApplicationBuildDocument) -> Self {
+        Self {
+            id: value.id.to_hex(),
+            application_id: value.application_id.to_hex(),
+            git_commit: value.git_commit,
+            git_ref: value.git_ref,
+            status: value.status,
+            jenkins_build_url: value.jenkins_build_url,
+            image_ref: value.image_ref,
+            image_digest_ref: value.image_digest_ref,
+            message: value.message,
+            created_at: value.created_at.try_to_rfc3339_string().unwrap_or_default(),
+            started_at: value
+                .started_at
+                .and_then(|value| value.try_to_rfc3339_string().ok()),
+            finished_at: value
+                .finished_at
+                .and_then(|value| value.try_to_rfc3339_string().ok()),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateGitCredentialRequest {
+    pub name: String,
+    pub credential_type: String,
+    pub username: Option<String>,
+    pub secret: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateHostedApplicationRequest {
+    pub name: String,
+    pub repository_url: String,
+    #[serde(default = "default_git_ref")]
+    pub git_ref: String,
+    pub credential_id: Option<String>,
+    #[serde(default = "default_build_mode")]
+    pub build_mode: String,
+    pub source_subdirectory: Option<String>,
+    pub build_command: Option<String>,
+    pub output_directory: Option<String>,
+    #[serde(default = "default_container_port")]
+    pub container_port: i32,
+    #[serde(default = "default_health_path")]
+    pub health_path: String,
+    pub cluster_id: String,
+    #[serde(default = "default_namespace")]
+    pub namespace: String,
+    #[serde(default = "default_replicas")]
+    pub replicas: i32,
+    #[serde(default = "default_cpu_request")]
+    pub cpu_request: String,
+    #[serde(default = "default_memory_request")]
+    pub memory_request: String,
+    #[serde(default = "default_cpu_limit")]
+    pub cpu_limit: String,
+    #[serde(default = "default_memory_limit")]
+    pub memory_limit: String,
+    pub route_host: Option<String>,
+    pub route_path: String,
+    pub gateway_name: Option<String>,
+    pub gateway_namespace: Option<String>,
+    #[serde(default)]
+    pub auto_deploy: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateHostedApplicationRequest {
+    pub git_ref: Option<String>,
+    pub build_mode: Option<String>,
+    pub source_subdirectory: Option<String>,
+    pub build_command: Option<String>,
+    pub output_directory: Option<String>,
+    pub container_port: Option<i32>,
+    pub health_path: Option<String>,
+    pub replicas: Option<i32>,
+    pub cpu_request: Option<String>,
+    pub memory_request: Option<String>,
+    pub cpu_limit: Option<String>,
+    pub memory_limit: Option<String>,
+    pub route_path: Option<String>,
+    pub auto_deploy: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplicationBuildCallbackRequest {
+    pub status: String,
+    pub git_commit: Option<String>,
+    pub image_ref: Option<String>,
+    pub image_digest_ref: Option<String>,
+    pub jenkins_build_url: Option<String>,
+    pub message: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplicationWebhookResponse {
+    pub url: String,
+    pub secret: String,
+}
+
+fn default_git_ref() -> String {
+    "main".into()
+}
+fn default_build_mode() -> String {
+    "dockerfile".into()
+}
+fn default_container_port() -> i32 {
+    8080
+}
+fn default_health_path() -> String {
+    "/".into()
+}
+fn default_namespace() -> String {
+    "default".into()
+}
+fn default_replicas() -> i32 {
+    1
+}
+fn default_cpu_request() -> String {
+    "100m".into()
+}
+fn default_memory_request() -> String {
+    "128Mi".into()
+}
+fn default_cpu_limit() -> String {
+    "500m".into()
+}
+fn default_memory_limit() -> String {
+    "512Mi".into()
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuditLogDocument {
     #[serde(rename = "_id")]

@@ -26,7 +26,7 @@ use crate::{
     auth, auth_routes, cache,
     config::AppConfig,
     error::AppError,
-    kubernetes,
+    hosting, kubernetes,
     models::{
         ApplyResourceRequest, AuditLogDocument, AuditLogResponse, AuditQuery, ClusterDocument,
         ClusterResponse, CreateClusterRequest, HealthResponse, LogsQuery, LogsResponse,
@@ -57,7 +57,7 @@ pub fn router(state: SharedState, config: &AppConfig) -> Result<Router, AppError
             HeaderName::from_static("x-kust-trusted-device"),
         ]);
 
-    Ok(Router::new()
+    let router: Router<SharedState> = Router::new()
         .route("/api/health", get(health))
         .route(
             "/api/auth/capabilities",
@@ -190,8 +190,8 @@ pub fn router(state: SharedState, config: &AppConfig) -> Result<Router, AppError
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
                 .on_response(DefaultOnResponse::new().level(Level::INFO)),
-        )
-        .with_state(state))
+        );
+    Ok(hosting::router_routes(router).with_state(state))
 }
 
 async fn health(State(state): State<SharedState>) -> Result<Json<HealthResponse>, AppError> {
@@ -848,7 +848,7 @@ async fn require_cluster_access(
     Ok(actor)
 }
 
-async fn write_audit(
+pub(crate) async fn write_audit(
     state: &SharedState,
     actor_user_id: Option<ObjectId>,
     action: &str,

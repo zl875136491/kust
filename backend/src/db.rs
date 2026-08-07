@@ -106,6 +106,45 @@ async fn create_indexes(database: &Database) -> Result<(), AppError> {
         doc! { "user_id": 1, "read_at": 1 },
     )
     .await?;
+    unique(
+        database,
+        "git_credentials",
+        doc! { "owner_user_id": 1, "name": 1 },
+        None,
+    )
+    .await?;
+    unique(
+        database,
+        "hosted_applications",
+        doc! { "cluster_id": 1, "namespace": 1, "slug": 1 },
+        None,
+    )
+    .await?;
+    unique(
+        database,
+        "hosted_applications",
+        doc! { "cluster_id": 1, "route_host": 1, "route_path": 1 },
+        None,
+    )
+    .await?;
+    index(
+        database,
+        "hosted_applications",
+        doc! { "owner_user_id": 1, "updated_at": -1 },
+    )
+    .await?;
+    index(
+        database,
+        "application_builds",
+        doc! { "application_id": 1, "created_at": -1 },
+    )
+    .await?;
+    index(
+        database,
+        "application_builds",
+        doc! { "status": 1, "created_at": -1 },
+    )
+    .await?;
     ttl(database, "sessions", "expires_at").await?;
     ttl(database, "trusted_devices", "expires_at").await?;
     ttl(database, "auth_codes", "expires_at").await?;
