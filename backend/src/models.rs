@@ -84,6 +84,8 @@ pub struct HostedApplicationDocument {
     pub output_directory: Option<String>,
     #[serde(default)]
     pub build_environment: BTreeMap<String, String>,
+    #[serde(default)]
+    pub runtime_environment: BTreeMap<String, String>,
     #[serde(default = "default_runtime_profile")]
     pub runtime_profile: String,
     pub container_port: i32,
@@ -154,6 +156,7 @@ pub struct HostedApplicationResponse {
     pub build_command: Option<String>,
     pub output_directory: Option<String>,
     pub build_environment: BTreeMap<String, String>,
+    pub runtime_environment: BTreeMap<String, String>,
     pub runtime_profile: String,
     pub container_port: i32,
     pub health_path: String,
@@ -241,6 +244,8 @@ pub struct CreateHostedApplicationRequest {
     pub output_directory: Option<String>,
     #[serde(default)]
     pub build_environment: BTreeMap<String, String>,
+    #[serde(default)]
+    pub runtime_environment: BTreeMap<String, String>,
     #[serde(default = "default_runtime_profile")]
     pub runtime_profile: String,
     #[serde(default = "default_container_port")]
@@ -281,6 +286,7 @@ pub struct UpdateHostedApplicationRequest {
     pub build_command: Option<String>,
     pub output_directory: Option<String>,
     pub build_environment: Option<BTreeMap<String, String>>,
+    pub runtime_environment: Option<BTreeMap<String, String>>,
     pub runtime_profile: Option<String>,
     pub container_port: Option<i32>,
     pub health_path: Option<String>,

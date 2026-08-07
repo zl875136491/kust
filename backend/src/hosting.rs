@@ -74,6 +74,10 @@ pub fn router_routes(router: axum::Router<SharedState>) -> axum::Router<SharedSt
             axum::routing::post(deploy_application),
         )
         .route(
+            "/api/hosting/applications/{application_id}/redeploy",
+            axum::routing::post(redeploy_application),
+        )
+        .route(
             "/api/hosting/applications/{application_id}/rollback",
             axum::routing::post(rollback_application),
         )
@@ -496,6 +500,29 @@ fn validate_build_environment(environment: &BTreeMap<String, String>) -> Result<
     Ok(())
 }
 
+fn validate_runtime_environment(environment: &BTreeMap<String, String>) -> Result<(), AppError> {
+    if environment.len() > 32
+        || environment.iter().any(|(key, value)| {
+            !valid_build_environment_key(key)
+                || !valid_build_environment_value(value)
+                || key.starts_with("KUST_")
+                || matches!(
+                    key.as_str(),
+                    "HTTP_PROXY"
+                        | "HTTPS_PROXY"
+                        | "NO_PROXY"
+                        | "GLOBAL_AGENT_HTTP_PROXY"
+                        | "GLOBAL_AGENT_HTTPS_PROXY"
+                )
+        })
+    {
+        return Err(AppError::bad_request(
+            "runtime environment contains an invalid or reserved value",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_runtime_profile(value: &str) -> Result<(), AppError> {
     if !matches!(value, "non_root" | "root_compatible") {
         return Err(AppError::bad_request("runtime profile is invalid"));
@@ -569,6 +596,7 @@ fn validate_app_request(
     }
     validate_resources(request)?;
     validate_build_environment(&request.build_environment)?;
+    validate_runtime_environment(&request.runtime_environment)?;
     validate_runtime_profile(&request.runtime_profile)?;
     normalized_route_path(&state.config.app_route_prefix, &request.route_path, &slug)?;
     let host =
@@ -634,6 +662,7 @@ fn app_response(
         build_command: app.build_command,
         output_directory: app.output_directory,
         build_environment: app.build_environment,
+        runtime_environment: app.runtime_environment,
         runtime_profile: app.runtime_profile,
         container_port: app.container_port,
         health_path: app.health_path,
@@ -758,6 +787,7 @@ async fn create_application(
         build_command: request.build_command,
         output_directory: request.output_directory,
         build_environment: request.build_environment,
+        runtime_environment: request.runtime_environment,
         runtime_profile: request.runtime_profile,
         container_port: request.container_port,
         health_path: request.health_path,
@@ -926,6 +956,10 @@ async fn update_application(
         validate_build_environment(&v)?;
         app.build_environment = v;
     }
+    if let Some(v) = request.runtime_environment {
+        validate_runtime_environment(&v)?;
+        app.runtime_environment = v;
+    }
     if let Some(v) = request.runtime_profile {
         validate_runtime_profile(&v)?;
         app.runtime_profile = v;
@@ -1035,6 +1069,121 @@ async fn deploy_application(
         ));
     }
     trigger_build(&state, &app, actor.user.id).await
+}
+
+async fn redeploy_application(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Path(application_id): Path<String>,
+) -> Result<impl IntoResponse, AppError> {
+    let (actor, app) = get_app_for_actor(&state, &headers, &application_id).await?;
+    require_hosting_write(&actor)?;
+    if !actor.user.is_admin() && app.owner_user_id != actor.user.id {
+        return Err(AppError::forbidden(
+            "only the application owner can redeploy it",
+        ));
+    }
+    let previous = state
+        .application_builds
+        .find(doc! {"application_id": app.id, "image_digest_ref": {"$type": "string"}})
+        .sort(doc! {"created_at": -1})
+        .await?
+        .try_next()
+        .await?
+        .ok_or_else(|| AppError::conflict("no previously built image is available to redeploy"))?;
+    let image = previous
+        .image_digest_ref
+        .clone()
+        .ok_or_else(|| AppError::conflict("no previously built image is available to redeploy"))?;
+    if state
+        .application_builds
+        .find_one(doc! {"application_id": app.id, "status": {"$in": ["queued", "running"]}})
+        .await?
+        .is_some()
+    {
+        return Err(AppError::conflict(
+            "an application build is already queued or running",
+        ));
+    }
+    let now = DateTime::now();
+    let build = ApplicationBuildDocument {
+        id: ObjectId::new(),
+        application_id: app.id,
+        triggered_by_user_id: Some(actor.user.id),
+        git_commit: previous.git_commit,
+        git_ref: previous.git_ref,
+        status: "running".into(),
+        jenkins_build_url: previous.jenkins_build_url,
+        image_ref: previous.image_ref,
+        image_digest_ref: Some(image.clone()),
+        message: Some("Reapplying the latest immutable image with current runtime settings".into()),
+        source_lease_token_hash: None,
+        source_lease_expires_at: None,
+        source_lease_consumed_at: None,
+        callback_token_hash: None,
+        callback_token_expires_at: None,
+        created_at: now,
+        started_at: Some(now),
+        finished_at: None,
+    };
+    let id = build.id;
+    state.application_builds.insert_one(&build).await?;
+    let deployment_state = state.clone();
+    let deployment_app = app.clone();
+    let deployment_image = image.clone();
+    tokio::spawn(async move {
+        let result = async {
+            let client = deployment_state
+                .kube_client(&deployment_app.cluster_id.to_hex())
+                .await?;
+            kubernetes::apply_hosted_application(
+                client,
+                &deployment_app,
+                &deployment_image,
+                deployment_state.config.app_image_pull_secret.as_deref(),
+            )
+            .await?;
+            kubernetes::wait_for_hosted_application_ready(
+                deployment_state
+                    .kube_client(&deployment_app.cluster_id.to_hex())
+                    .await?,
+                &deployment_app,
+                std::time::Duration::from_secs(deployment_state.config.app_rollout_timeout_seconds),
+            )
+            .await
+        }
+        .await;
+        let (status, message) = match result {
+            Ok(()) => (
+                "succeeded",
+                "Deployment, Service and HTTPRoute are ready".to_string(),
+            ),
+            Err(error) => ("failed", format!("Kubernetes redeployment failed: {error}")),
+        };
+        if let Err(error) = deployment_state
+            .application_builds
+            .update_one(
+                doc! {"_id": id, "status": "running"},
+                doc! {"$set": {"status": status, "message": message, "finished_at": DateTime::now()}},
+            )
+            .await
+        {
+            tracing::warn!(%error, build_id = %id.to_hex(), "unable to record hosted application redeployment result");
+        }
+    });
+    write_audit(
+        &state,
+        Some(actor.user.id),
+        "hosting.redeploy",
+        Some(&app.name),
+        Some(app.cluster_id),
+        json!({"buildId": id.to_hex(), "imageDigestRef": image}),
+    )
+    .await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(ApplicationBuildResponse::from(build)),
+    ))
 }
 
 async fn rollback_application(

@@ -279,6 +279,7 @@ export interface HostedApplication {
   buildCommand?: string;
   outputDirectory?: string;
   buildEnvironment: Record<string, string>;
+  runtimeEnvironment: Record<string, string>;
   runtimeProfile: 'non_root' | 'root_compatible';
   containerPort: number;
   healthPath: string;
@@ -319,6 +320,7 @@ export interface CreateHostedApplicationPayload {
   buildCommand?: string;
   outputDirectory?: string;
   buildEnvironment: Record<string, string>;
+  runtimeEnvironment: Record<string, string>;
   runtimeProfile: 'non_root' | 'root_compatible';
   containerPort: number;
   healthPath: string;
@@ -345,6 +347,7 @@ export interface UpdateHostedApplicationPayload {
   buildCommand?: string;
   outputDirectory?: string;
   buildEnvironment?: Record<string, string>;
+  runtimeEnvironment?: Record<string, string>;
   runtimeProfile?: 'non_root' | 'root_compatible';
   containerPort?: number;
   healthPath?: string;

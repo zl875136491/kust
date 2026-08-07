@@ -83,7 +83,7 @@ spec:
             - name: KUST_APP_CALLBACK_RESOLVE
               value: k8s.1oa.com.cn:80:10.17.158.71
             - name: KUST_APP_ROLLOUT_TIMEOUT_SECONDS
-              value: "180"
+              value: "900"
             - name: KUST_JENKINS_URL
               valueFrom:
                 secretKeyRef:

@@ -1659,9 +1659,10 @@ pub async fn apply_hosted_application(
     let mut container = json!({
         "name": "app", "image": image_digest_ref,
         "ports": [{"containerPort": application.container_port, "name": port_name}],
+        "env": application.runtime_environment.iter().map(|(name, value)| json!({"name": name, "value": value})).collect::<Vec<_>>(),
         "readinessProbe": {"httpGet": probe["httpGet"], "periodSeconds": 8},
         "livenessProbe": {"httpGet": probe["httpGet"], "periodSeconds": 16},
-        "startupProbe": {"httpGet": probe["httpGet"], "periodSeconds": 5, "failureThreshold": 30}
+        "startupProbe": {"httpGet": probe["httpGet"], "periodSeconds": 5, "failureThreshold": 120}
     });
     if !security_context.is_null() {
         container["securityContext"] = security_context;

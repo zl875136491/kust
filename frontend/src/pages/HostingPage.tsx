@@ -13,7 +13,7 @@ const modeOptions: Array<{ value: HostingBuildMode; label: string; detail: strin
 ];
 
 const initialApplication = (): CreateHostedApplicationPayload => ({
-  name: '', repositoryUrl: '', gitRef: 'main', buildMode: 'dockerfile', sourceSubdirectory: '', buildCommand: '', outputDirectory: 'dist', buildEnvironment: {}, runtimeProfile: 'non_root', containerPort: 8080, healthPath: '/', healthScheme: 'HTTP', serviceScheme: 'HTTP', clusterId: '', namespace: 'default', replicas: 1, cpuRequest: '100m', memoryRequest: '128Mi', cpuLimit: '500m', memoryLimit: '512Mi', routePath: '/', autoDeploy: false,
+  name: '', repositoryUrl: '', gitRef: 'main', buildMode: 'dockerfile', sourceSubdirectory: '', buildCommand: '', outputDirectory: 'dist', buildEnvironment: {}, runtimeEnvironment: {}, runtimeProfile: 'non_root', containerPort: 8080, healthPath: '/', healthScheme: 'HTTP', serviceScheme: 'HTTP', clusterId: '', namespace: 'default', replicas: 1, cpuRequest: '100m', memoryRequest: '128Mi', cpuLimit: '500m', memoryLimit: '512Mi', routePath: '/', autoDeploy: false,
 });
 
 function environmentText(environment: Record<string, string>) {
@@ -66,6 +66,9 @@ export function HostingPage() {
   const deploy = async (application: HostedApplication) => {
     try { const build = await api.deployHostedApplication(application.id); setApplications((current) => current.map((item) => item.id === application.id ? { ...item, latestBuild: build } : item)); pushToast(`已触发 ${application.name} 的构建`); } catch (error) { pushToast(error instanceof Error ? error.message : '无法触发部署', 'error'); }
   };
+  const redeploy = async (application: HostedApplication) => {
+    try { const build = await api.redeployHostedApplication(application.id); setApplications((current) => current.map((item) => item.id === application.id ? { ...item, latestBuild: build } : item)); setSelected((current) => current?.id === application.id ? { ...current, latestBuild: build } : current); pushToast(`正在重新发布 ${application.name}`); } catch (error) { pushToast(error instanceof Error ? error.message : '无法重新发布应用', 'error'); }
+  };
   const rollback = async (application: HostedApplication) => {
     try { await api.rollbackHostedApplication(application.id); pushToast(`已将 ${application.name} 回滚到上一版本`); void reload(); } catch (error) { pushToast(error instanceof Error ? error.message : '无法回滚', 'error'); }
   };
@@ -82,11 +85,11 @@ export function HostingPage() {
     <section className="hosting-summary"><article className="glass-card"><PackageCheck size={20} /><div><strong>{applications.length}</strong><span>托管应用</span></div></article><article className="glass-card"><Rocket size={20} /><div><strong>{applications.filter((item) => item.latestBuild?.status === 'succeeded').length}</strong><span>已发布版本</span></div></article><article className="glass-card"><GitBranch size={20} /><div><strong>{credentials.length}</strong><span>Git 凭证</span></div></article></section>
     {applications.length === 0 ? <EmptyState icon={<Rocket size={25} />} title="还没有托管应用" body="连接 Git 仓库后，Kust 会通过 Jenkins 构建镜像，并用受控 Deployment、Service 与 HTTPRoute 发布。" action={<Button variant="primary" icon={<CirclePlus size={16} />} disabled={!capabilities.hostingEnabled} onClick={() => setCreateOpen(true)}>新建应用</Button>} /> : <section className="hosting-list glass-card">
       <header className="hosting-list__header"><div><Rocket size={18} /><strong>应用</strong><span>{applications.length}</span></div><small>受控部署到 Deployment、Service 与 HTTPRoute</small></header>
-      <div className="hosting-list__body">{applications.map((application) => <ApplicationRow key={application.id} application={application} onDeploy={() => void deploy(application)} onRollback={() => void rollback(application)} onOpen={() => setSelected(application)} onDelete={() => setDeleting(application)} />)}</div>
+      <div className="hosting-list__body">{applications.map((application) => <ApplicationRow key={application.id} application={application} onDeploy={() => void deploy(application)} onRedeploy={() => void redeploy(application)} onRollback={() => void rollback(application)} onOpen={() => setSelected(application)} onDelete={() => setDeleting(application)} />)}</div>
     </section>}
     <CreateApplicationModal open={createOpen} clusters={clusters} credentials={credentials} capabilities={capabilities} onClose={() => setCreateOpen(false)} onCreated={(application) => { setApplications((current) => [application, ...current]); setCreateOpen(false); void deploy(application); }} />
     <CredentialsModal open={credentialOpen} credentials={credentials} onClose={() => setCredentialOpen(false)} onChanged={setCredentials} />
-    <ApplicationDetailModal application={selected} onClose={() => { setSelected(undefined); setWebhook(undefined); }} onDeploy={deploy} onConfigureCompatibility={setCompatibility} webhook={webhook} onConfigureWebhook={async (application) => { try { const value = await api.rotateHostedApplicationWebhook(application.id); setWebhook(value); setApplications((current) => current.map((item) => item.id === application.id ? { ...item, webhookConfigured: true } : item)); setSelected((current) => current?.id === application.id ? { ...current, webhookConfigured: true } : current); pushToast('GitLab Webhook 密钥已生成，仅在当前窗口展示一次'); } catch (error) { pushToast(error instanceof Error ? error.message : '无法生成 GitLab Webhook 配置', 'error'); } }} />
+    <ApplicationDetailModal application={selected} onClose={() => { setSelected(undefined); setWebhook(undefined); }} onDeploy={deploy} onRedeploy={redeploy} onConfigureCompatibility={setCompatibility} webhook={webhook} onConfigureWebhook={async (application) => { try { const value = await api.rotateHostedApplicationWebhook(application.id); setWebhook(value); setApplications((current) => current.map((item) => item.id === application.id ? { ...item, webhookConfigured: true } : item)); setSelected((current) => current?.id === application.id ? { ...current, webhookConfigured: true } : current); pushToast('GitLab Webhook 密钥已生成，仅在当前窗口展示一次'); } catch (error) { pushToast(error instanceof Error ? error.message : '无法生成 GitLab Webhook 配置', 'error'); } }} />
     <CompatibilityModal application={compatibility} onClose={() => setCompatibility(undefined)} onSaved={(application) => { setApplications((current) => current.map((item) => item.id === application.id ? application : item)); setSelected((current) => current?.id === application.id ? application : current); setCompatibility(undefined); pushToast('兼容性设置已保存，请重新部署应用'); }} />
     <Modal open={Boolean(deleting)} onClose={() => setDeleting(undefined)} title={`删除 ${deleting?.name || ''}`} width="460px" footer={(requestClose) => <><Button variant="ghost" onClick={requestClose}>取消</Button><Button variant="danger" icon={<Trash2 size={16} />} onClick={() => void remove()}>删除应用</Button></>}>
       <p className="confirm-copy">Kust 将删除它管理的 Deployment、Service 与 HTTPRoute。Harbor 中已构建的镜像不会被立即清理。</p>
@@ -94,7 +97,7 @@ export function HostingPage() {
   </div>;
 }
 
-function ApplicationRow({ application, onDeploy, onRollback, onOpen, onDelete }: { application: HostedApplication; onDeploy: () => void; onRollback: () => void; onOpen: () => void; onDelete: () => void }) {
+function ApplicationRow({ application, onDeploy, onRedeploy, onRollback, onOpen, onDelete }: { application: HostedApplication; onDeploy: () => void; onRedeploy: () => void; onRollback: () => void; onOpen: () => void; onDelete: () => void }) {
   const routePath = application.routePath.endsWith('/') ? application.routePath : `${application.routePath}/`;
   const url = `http://${application.routeHost}${routePath}`;
   return <article className="hosting-app-row">
@@ -102,7 +105,7 @@ function ApplicationRow({ application, onDeploy, onRollback, onOpen, onDelete }:
     <div className="hosting-app-target"><span>{application.namespace}</span><small>{application.replicas} 副本 · {application.containerPort}</small></div>
     <a className="hosting-route" href={url} target="_blank" rel="noreferrer" title={url}><span>{application.routePath}</span><ExternalLink size={14} /></a>
     <div className="hosting-app-build"><StatusPill status={application.latestBuild?.status === 'succeeded' ? '已发布' : application.latestBuild?.status === 'running' ? '构建中' : application.latestBuild?.status === 'failed' ? '失败' : '未部署'} /><small>{formatDate(application.latestBuild?.createdAt)}</small></div>
-    <div className="hosting-app-actions"><IconButton label="重新部署" onClick={onDeploy}><Rocket size={16} /></IconButton><IconButton label="回滚上一版本" onClick={onRollback}><RotateCcw size={16} /></IconButton><IconButton label="删除应用" onClick={onDelete}><Trash2 size={16} /></IconButton></div>
+    <div className="hosting-app-actions"><IconButton label="重新发布已有镜像" onClick={onRedeploy}><RefreshCw size={16} /></IconButton><IconButton label="重新构建并部署" onClick={onDeploy}><Rocket size={16} /></IconButton><IconButton label="回滚上一版本" onClick={onRollback}><RotateCcw size={16} /></IconButton><IconButton label="删除应用" onClick={onDelete}><Trash2 size={16} /></IconButton></div>
   </article>;
 }
 
@@ -135,43 +138,45 @@ function CredentialsModal({ open, credentials, onClose, onChanged }: { open: boo
 
 function CompatibilityModal({ application, onClose, onSaved }: { application?: HostedApplication; onClose: () => void; onSaved: (application: HostedApplication) => void }) {
   const { pushToast } = useToast();
-  const [environment, setEnvironment] = useState('');
+  const [buildEnvironment, setBuildEnvironment] = useState('');
+  const [runtimeEnvironment, setRuntimeEnvironment] = useState('');
   const [runtimeProfile, setRuntimeProfile] = useState<'non_root' | 'root_compatible'>('non_root');
   const [healthScheme, setHealthScheme] = useState<'HTTP' | 'HTTPS'>('HTTP');
   const [serviceScheme, setServiceScheme] = useState<'HTTP' | 'HTTPS'>('HTTP');
   const [saving, setSaving] = useState(false);
   useEffect(() => {
-    setEnvironment(environmentText(application?.buildEnvironment || {}));
+    setBuildEnvironment(environmentText(application?.buildEnvironment || {}));
+    setRuntimeEnvironment(environmentText(application?.runtimeEnvironment || {}));
     setRuntimeProfile(application?.runtimeProfile || 'non_root');
     setHealthScheme(application?.healthScheme || 'HTTP');
     setServiceScheme(application?.serviceScheme || 'HTTP');
   }, [application]);
   const save = async () => {
     if (!application) return false;
-    const parsed = parseEnvironment(environment);
-    if (environment.split('\n').filter(Boolean).some((line) => !/^[A-Z_][A-Z0-9_]*=.+$/.test(line.trim()))) {
-      pushToast('构建环境变量必须使用 KEY=value 格式', 'error');
+    const invalid = [buildEnvironment, runtimeEnvironment].some((environment) => environment.split('\n').filter(Boolean).some((line) => !/^[A-Z_][A-Z0-9_]*=.+$/.test(line.trim())));
+    if (invalid) {
+      pushToast('环境变量必须使用 KEY=value 格式', 'error');
       return false;
     }
     setSaving(true);
     try {
-      onSaved(await api.updateHostedApplication(application.id, { buildEnvironment: parsed, runtimeProfile, healthScheme, serviceScheme }));
+      onSaved(await api.updateHostedApplication(application.id, { buildEnvironment: parseEnvironment(buildEnvironment), runtimeEnvironment: parseEnvironment(runtimeEnvironment), runtimeProfile, healthScheme, serviceScheme }));
       return true;
     } catch (error) {
       pushToast(error instanceof Error ? error.message : '无法保存兼容性设置', 'error');
       return false;
     } finally { setSaving(false); }
   };
-  return <Modal open={Boolean(application)} onClose={onClose} title={`${application?.name || ''} · 兼容性`} description="构建变量仅用于镜像构建；Root 兼容仍会禁止提权并丢弃 Linux capabilities。" width="720px" dirty={Boolean(environment !== environmentText(application?.buildEnvironment || {}) || runtimeProfile !== (application?.runtimeProfile || 'non_root') || healthScheme !== (application?.healthScheme || 'HTTP') || serviceScheme !== (application?.serviceScheme || 'HTTP'))} onSave={save} footer={(requestClose) => <><Button variant="ghost" onClick={requestClose}>取消</Button><Button variant="primary" icon={<Settings2 size={16} />} onClick={() => void save()} disabled={saving}>{saving ? '保存中' : '保存设置'}</Button></>}>
-    <div className="hosting-compatibility"><label className="field"><span>构建环境变量</span><textarea rows={6} value={environment} onChange={(event) => setEnvironment(event.target.value)} placeholder="ONNXRUNTIME_NODE_INSTALL_CUDA=skip" spellCheck={false} /><small>每行一个 KEY=value。变量会注入到 Dockerfile 的每个构建阶段，敏感信息请使用 Git 凭证或后续的 Secret 配置。</small></label><div className="form-grid"><SelectMenu label="运行兼容模式" value={runtimeProfile} options={[{ value: 'non_root', label: '默认非 root' }, { value: 'root_compatible', label: 'Root 兼容（受限）' }]} onChange={(value) => setRuntimeProfile(value as 'non_root' | 'root_compatible')} /><SelectMenu label="健康检查协议" value={healthScheme} options={[{ value: 'HTTP', label: 'HTTP' }, { value: 'HTTPS', label: 'HTTPS' }]} onChange={(value) => setHealthScheme(value as 'HTTP' | 'HTTPS')} /><SelectMenu label="网关后端协议" value={serviceScheme} options={[{ value: 'HTTP', label: 'HTTP' }, { value: 'HTTPS', label: 'HTTPS' }]} onChange={(value) => setServiceScheme(value as 'HTTP' | 'HTTPS')} /></div><p className="confirm-copy">Root 兼容用于必须由官方入口以 root 完成初始化的上游镜像。它不会赋予 privileged 权限或 Linux capabilities。</p></div>
+  return <Modal open={Boolean(application)} onClose={onClose} title={`${application?.name || ''} · 兼容性`} description="构建参数只影响 Jenkins；运行参数会写入 Deployment，并可直接重新发布现有镜像。" width="720px" dirty={Boolean(buildEnvironment !== environmentText(application?.buildEnvironment || {}) || runtimeEnvironment !== environmentText(application?.runtimeEnvironment || {}) || runtimeProfile !== (application?.runtimeProfile || 'non_root') || healthScheme !== (application?.healthScheme || 'HTTP') || serviceScheme !== (application?.serviceScheme || 'HTTP'))} onSave={save} footer={(requestClose) => <><Button variant="ghost" onClick={requestClose}>取消</Button><Button variant="primary" icon={<Settings2 size={16} />} onClick={() => void save()} disabled={saving}>{saving ? '保存中' : '保存设置'}</Button></>}>
+    <div className="hosting-compatibility"><label className="field"><span>构建环境变量</span><textarea rows={4} value={buildEnvironment} onChange={(event) => setBuildEnvironment(event.target.value)} placeholder="ONNXRUNTIME_NODE_INSTALL_CUDA=skip" spellCheck={false} /><small>每行一个 KEY=value。变量会注入 Dockerfile 的构建阶段。</small></label><label className="field"><span>运行环境变量</span><textarea rows={4} value={runtimeEnvironment} onChange={(event) => setRuntimeEnvironment(event.target.value)} placeholder="BYPASS_EMBEDDING_AND_RETRIEVAL=true" spellCheck={false} /><small>每行一个 KEY=value。变量会注入容器启动环境，修改后可直接重新发布已有镜像。</small></label><div className="form-grid"><SelectMenu label="运行兼容模式" value={runtimeProfile} options={[{ value: 'non_root', label: '默认非 root' }, { value: 'root_compatible', label: 'Root 兼容（受限）' }]} onChange={(value) => setRuntimeProfile(value as 'non_root' | 'root_compatible')} /><SelectMenu label="健康检查协议" value={healthScheme} options={[{ value: 'HTTP', label: 'HTTP' }, { value: 'HTTPS', label: 'HTTPS' }]} onChange={(value) => setHealthScheme(value as 'HTTP' | 'HTTPS')} /><SelectMenu label="网关后端协议" value={serviceScheme} options={[{ value: 'HTTP', label: 'HTTP' }, { value: 'HTTPS', label: 'HTTPS' }]} onChange={(value) => setServiceScheme(value as 'HTTP' | 'HTTPS')} /></div><p className="confirm-copy">Root 兼容用于必须由官方入口以 root 完成初始化的上游镜像。它不会赋予 privileged 权限或 Linux capabilities。</p></div>
   </Modal>;
 }
 
-function ApplicationDetailModal({ application, onClose, onDeploy, onConfigureCompatibility, webhook, onConfigureWebhook }: { application?: HostedApplication; onClose: () => void; onDeploy: (application: HostedApplication) => void; onConfigureCompatibility: (application: HostedApplication) => void; webhook?: ApplicationWebhook; onConfigureWebhook: (application: HostedApplication) => Promise<void> }) {
+function ApplicationDetailModal({ application, onClose, onDeploy, onRedeploy, onConfigureCompatibility, webhook, onConfigureWebhook }: { application?: HostedApplication; onClose: () => void; onDeploy: (application: HostedApplication) => void; onRedeploy: (application: HostedApplication) => void; onConfigureCompatibility: (application: HostedApplication) => void; webhook?: ApplicationWebhook; onConfigureWebhook: (application: HostedApplication) => Promise<void> }) {
   const { pushToast } = useToast(); const [builds, setBuilds] = useState<ApplicationBuild[]>([]); const [loading, setLoading] = useState(false);
   useEffect(() => { if (!application) { setBuilds([]); return; } setLoading(true); api.hostedApplicationBuilds(application.id).then(setBuilds).catch((error) => pushToast(error instanceof Error ? error.message : '无法读取构建记录', 'error')).finally(() => setLoading(false)); }, [application, pushToast]);
   if (!application) return null; const routePath = application.routePath.endsWith('/') ? application.routePath : `${application.routePath}/`; const url = `http://${application.routeHost}${routePath}`;
-  return <Modal open onClose={onClose} title={application.name} description={`${application.clusterId} · ${application.namespace} · ${application.buildMode}`} width="880px" footer={<><a className="button button--secondary" href={url} target="_blank" rel="noreferrer"><ExternalLink size={16} /><span>访问路由</span></a><Button variant="secondary" icon={<Settings2 size={16} />} onClick={() => onConfigureCompatibility(application)}>兼容性</Button><Button variant="primary" icon={<Rocket size={16} />} onClick={() => onDeploy(application)}>重新部署</Button></>}>
+  return <Modal open onClose={onClose} title={application.name} description={`${application.clusterId} · ${application.namespace} · ${application.buildMode}`} width="880px" footer={<><a className="button button--secondary" href={url} target="_blank" rel="noreferrer"><ExternalLink size={16} /><span>访问路由</span></a><Button variant="secondary" icon={<Settings2 size={16} />} onClick={() => onConfigureCompatibility(application)}>兼容性</Button><Button variant="secondary" icon={<RefreshCw size={16} />} onClick={() => onRedeploy(application)}>重新发布</Button><Button variant="primary" icon={<Rocket size={16} />} onClick={() => onDeploy(application)}>重新构建</Button></>}>
     <div className="application-detail"><section className="application-detail__route"><ArrowUpRight size={18} /><div><strong>{application.routeHost}{application.routePath}</strong><small>Gateway: {application.gatewayNamespace}/{application.gatewayName}</small></div><StatusPill status={application.latestBuild?.status === 'succeeded' ? '已发布' : application.latestBuild?.status || '未部署'} /></section><section className="application-webhook"><header><div><Link2 size={16} /><span><strong>GitLab 自动部署</strong><small>{application.autoDeploy ? '匹配的分支或 Tag push 会触发构建。' : '请先在编辑应用时启用自动部署。'}</small></span></div><Button variant="secondary" icon={<KeyRound size={15} />} onClick={() => void onConfigureWebhook(application)}>{application.webhookConfigured ? '轮换密钥' : '生成 Webhook'}</Button></header>{webhook && <div className="application-webhook__secret"><label><span>Webhook URL</span><code>{webhook.url}</code></label><label><span>Secret Token（仅展示一次）</span><code>{webhook.secret}</code></label></div>}</section><section><h3>构建历史</h3>{loading ? <div className="detail-loading"><LoaderCircle className="spin" size={17} />加载构建记录</div> : <div className="build-history">{builds.length ? builds.map((build) => <article key={build.id}><StatusPill status={build.status === 'succeeded' ? '成功' : build.status === 'running' ? '构建中' : build.status === 'failed' ? '失败' : build.status} /><div><strong>{build.gitCommit ? build.gitCommit.slice(0, 12) : build.gitRef}</strong><small>{build.message || '等待 Jenkins 回传状态'}</small></div><time>{formatDate(build.createdAt)}</time>{build.jenkinsBuildUrl && <a href={build.jenkinsBuildUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} /></a>}</article>) : <span className="muted-cell">尚无构建记录</span>}</div>}</section></div>
   </Modal>;
 }
