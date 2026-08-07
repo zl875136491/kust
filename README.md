@@ -316,6 +316,7 @@ npm run dev
 | `KUST_JENKINS_API_TOKEN` | 无 | Jenkins API Token，只能由后端运行环境读取 |
 | `KUST_JENKINS_APP_JOB` | `kust_customer_apps/application-hosting` | 固定的通用应用构建 Job 名称 |
 | `KUST_APP_CALLBACK_BASE_URL` | `FRONT_URL` | Jenkins 可访问的 Kust API 根地址；建议使用集群内 Service 地址 |
+| `KUST_APP_CALLBACK_RESOLVE` | 无 | 可选的 `host:port:ip`，在 Jenkins Agent 无法解析回调域名时传入 Job 的 `curl --resolve` |
 | `KUST_APP_DEFAULT_GATEWAY_NAME` | 无 | 托管应用唯一允许使用的 Gateway 名称 |
 | `KUST_APP_DEFAULT_GATEWAY_NAMESPACE` | `default` | 该 Gateway 的命名空间 |
 | `KUST_APP_DEFAULT_ROUTE_HOST` | 无 | 托管 HTTPRoute 默认 Host，也是允许的域名边界 |
@@ -382,7 +383,7 @@ ci/Jenkinsfile.application-hosting
 | --- | --- | --- |
 | `infra_harbor_auth` | Username with password | 仅推送受控 Harbor 应用镜像 |
 
-Jenkins agent 需要 `git`、`curl`、`jq`、Docker daemon；使用 `buildpack` 模式时还需要 `pack` CLI。`KUST_SOURCE_TOKEN` 与 `KUST_CALLBACK_TOKEN` 由 Kust 在触发 Job 时传入，Job 无需保存长期 Kust 回调 Secret。该 Job 不应使用 `tianjin_k8s_admin_token`，也不应 checkout 或执行目标仓库内的 `Jenkinsfile`。目标仓库属于不可信输入，必须运行在临时隔离 Agent 上，不能使用带生产凭据或宿主机网络的共享执行器。
+Jenkins agent 需要 `git`、`curl`、`jq`、Docker daemon；使用 `buildpack` 模式时还需要 `pack` CLI。`KUST_SOURCE_TOKEN` 与 `KUST_CALLBACK_TOKEN` 由 Kust 在触发 Job 时传入，Job 无需保存长期 Kust 回调 Secret。若构建节点无法解析回调域名，可在运行时设置受控的 `KUST_APP_CALLBACK_RESOLVE=host:port:ip`，Job 将仅对 Kust 的 source lease 和回调请求使用 `curl --resolve`。该 Job 不应使用 `tianjin_k8s_admin_token`，也不应 checkout 或执行目标仓库内的 `Jenkinsfile`。目标仓库属于不可信输入，必须运行在临时隔离 Agent 上，不能使用带生产凭据或宿主机网络的共享执行器。
 
 生产 runtime Secret 需要补充可选键 `jenkins-url`、`jenkins-user`、`jenkins-api-token`。部署模板已引用这些键；未配置 Jenkins 时，应用可保存但构建将保持排队。目标命名空间还需预先存在 `KUST_APP_IMAGE_PULL_SECRET` 指定的 Harbor 拉取 Secret。
 

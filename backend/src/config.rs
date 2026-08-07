@@ -29,6 +29,7 @@ pub struct AppConfig {
     pub app_allowed_namespaces: Vec<String>,
     pub app_allowed_git_hosts: Vec<String>,
     pub app_callback_base_url: Option<String>,
+    pub app_callback_resolve: Option<String>,
     pub app_rollout_timeout_seconds: u64,
 }
 
@@ -113,6 +114,7 @@ impl AppConfig {
             app_allowed_namespaces: csv_env("KUST_APP_ALLOWED_NAMESPACES"),
             app_allowed_git_hosts: csv_env("KUST_APP_ALLOWED_GIT_HOSTS"),
             app_callback_base_url: optional_env("KUST_APP_CALLBACK_BASE_URL"),
+            app_callback_resolve: optional_env("KUST_APP_CALLBACK_RESOLVE"),
             app_rollout_timeout_seconds: env_u64("KUST_APP_ROLLOUT_TIMEOUT_SECONDS", 180)?
                 .clamp(30, 900),
         })

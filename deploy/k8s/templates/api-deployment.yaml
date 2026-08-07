@@ -80,6 +80,8 @@ spec:
               value: gitlab.1oa.com.cn,github.com,gitlab.com
             - name: KUST_APP_CALLBACK_BASE_URL
               value: http://k8s.1oa.com.cn__BASE_PATH__
+            - name: KUST_APP_CALLBACK_RESOLVE
+              value: k8s.1oa.com.cn:80:10.17.158.71
             - name: KUST_APP_ROLLOUT_TIMEOUT_SECONDS
               value: "180"
             - name: KUST_JENKINS_URL

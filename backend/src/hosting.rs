@@ -1126,6 +1126,14 @@ async fn trigger_build(
                 "KUST_CALLBACK_URL",
                 callback_url(state, build_id, "callback"),
             ),
+            (
+                "KUST_CALLBACK_RESOLVE",
+                state
+                    .config
+                    .app_callback_resolve
+                    .clone()
+                    .unwrap_or_default(),
+            ),
             ("KUST_SOURCE_TOKEN", source_lease_token),
             ("KUST_CALLBACK_TOKEN", callback_token),
         ];

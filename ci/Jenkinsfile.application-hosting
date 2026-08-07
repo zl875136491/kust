@@ -15,6 +15,7 @@ pipeline {
     choice(name: "BUILD_MODE", choices: ["dockerfile", "buildpack", "static", "custom"])
     string(name: "IMAGE_REPOSITORY", trim: true)
     string(name: "KUST_CALLBACK_URL", trim: true)
+    string(name: "KUST_CALLBACK_RESOLVE", defaultValue: "", trim: true)
     password(name: "KUST_SOURCE_TOKEN", defaultValue: "", description: "One-time Kust source lease")
     password(name: "KUST_CALLBACK_TOKEN", defaultValue: "", description: "Per-build Kust callback token")
   }
@@ -41,7 +42,11 @@ pipeline {
 set -Eeuo pipefail
 set +x
 test -n "${KUST_SOURCE_TOKEN}"
-curl --fail --silent --show-error --header "X-Kust-Build-Token: ${KUST_SOURCE_TOKEN}" "${KUST_CALLBACK_URL%/callback}/source" > source.json
+resolve_args=()
+if [ -n "${KUST_CALLBACK_RESOLVE}" ]; then
+  resolve_args=(--resolve "${KUST_CALLBACK_RESOLVE}")
+fi
+curl --fail --silent --show-error "${resolve_args[@]}" --header "X-Kust-Build-Token: ${KUST_SOURCE_TOKEN}" "${KUST_CALLBACK_URL%/callback}/source" > source.json
 test -s source.json
 '''
       }
@@ -150,7 +155,11 @@ digest="$(awk '/digest: sha256:/{for (i = 1; i <= NF; i++) if ($i ~ /^sha256:/) 
 test -n "${digest}"
 digest_ref="${IMAGE_REPOSITORY}@${digest}"
 payload="$(jq -n --arg status succeeded --arg commit "${commit}" --arg image "${image}" --arg digest "${digest_ref}" --arg url "${BUILD_URL}" '{status:$status,gitCommit:$commit,imageRef:$image,imageDigestRef:$digest,jenkinsBuildUrl:$url,message:"Image pushed; Kust is applying controlled Kubernetes resources"}')"
-curl --fail --silent --show-error --header "X-Kust-Build-Token: ${KUST_CALLBACK_TOKEN}" --header "Content-Type: application/json" --data "${payload}" "${KUST_CALLBACK_URL}"
+resolve_args=()
+if [ -n "${KUST_CALLBACK_RESOLVE}" ]; then
+  resolve_args=(--resolve "${KUST_CALLBACK_RESOLVE}")
+fi
+curl --fail --silent --show-error "${resolve_args[@]}" --header "X-Kust-Build-Token: ${KUST_CALLBACK_TOKEN}" --header "Content-Type: application/json" --data "${payload}" "${KUST_CALLBACK_URL}"
 '''
         }
       }
@@ -164,7 +173,11 @@ if [ -z "${KUST_CALLBACK_URL:-}" ] || [ -z "${KUST_CALLBACK_TOKEN:-}" ]; then
   exit 0
 fi
 payload="$(jq -n --arg status failed --arg message "Jenkins build failed: ${BUILD_URL}" --arg url "${BUILD_URL}" '{status:$status,message:$message,jenkinsBuildUrl:$url}')"
-curl --silent --show-error --header "X-Kust-Build-Token: ${KUST_CALLBACK_TOKEN}" --header "Content-Type: application/json" --data "${payload}" "${KUST_CALLBACK_URL}" || true
+resolve_args=()
+if [ -n "${KUST_CALLBACK_RESOLVE}" ]; then
+  resolve_args=(--resolve "${KUST_CALLBACK_RESOLVE}")
+fi
+curl --silent --show-error "${resolve_args[@]}" --header "X-Kust-Build-Token: ${KUST_CALLBACK_TOKEN}" --header "Content-Type: application/json" --data "${payload}" "${KUST_CALLBACK_URL}" || true
 '''
     }
     always { sh "rm -rf app source.json build-input.json git-commit.txt image-ref.txt push.log || true" }
