@@ -1670,8 +1670,8 @@ pub async fn apply_hosted_application(
     });
     let service = json!({
         "apiVersion": "v1", "kind": "Service",
-        "metadata": {"name": application.slug, "namespace": application.namespace, "labels": labels, "annotations": {"traefik.io/service.serversscheme": application.service_scheme.to_lowercase()}},
-        "spec": {"selector": {"app.kubernetes.io/name": application.slug}, "ports": [{"name": "http", "port": application.container_port, "targetPort": "http"}]}
+        "metadata": {"name": application.slug, "namespace": application.namespace, "labels": labels},
+        "spec": {"selector": {"app.kubernetes.io/name": application.slug}, "ports": [{"name": "http", "port": application.container_port, "targetPort": "http", "appProtocol": application.service_scheme.to_lowercase()}]}
     });
     let route = json!({
         "apiVersion": "gateway.networking.k8s.io/v1", "kind": "HTTPRoute",
@@ -1802,9 +1802,11 @@ async fn hosted_route_accepted(
                 .get("conditions")
                 .and_then(Value::as_array)
                 .is_some_and(|conditions| {
-                    conditions.iter().any(|condition| {
-                        condition.get("type").and_then(Value::as_str) == Some("Accepted")
-                            && condition.get("status").and_then(Value::as_str) == Some("True")
+                    ["Accepted", "ResolvedRefs"].iter().all(|expected| {
+                        conditions.iter().any(|condition| {
+                            condition.get("type").and_then(Value::as_str) == Some(*expected)
+                                && condition.get("status").and_then(Value::as_str) == Some("True")
+                        })
                     })
                 })
         })
