@@ -32,6 +32,12 @@ use crate::{
 const SOURCE_LEASE_TTL_MILLIS: i64 = 60 * 60 * 1_000;
 const CALLBACK_TOKEN_TTL_MILLIS: i64 = 90 * 60 * 1_000;
 const UNCLAIMED_BUILD_GRACE_MILLIS: i64 = 15 * 60 * 1_000;
+// A build that claimed its source but never calls back is normally an aborted or
+// disconnected Jenkins job. A build with a cleared callback token has already
+// handed its immutable image to Kust, so allow extra time for rollout before
+// making it eligible for a retry as well.
+const UNCALLED_BUILD_GRACE_MILLIS: i64 = CALLBACK_TOKEN_TTL_MILLIS;
+const UNFINISHED_ROLLOUT_GRACE_MILLIS: i64 = 45 * 60 * 1_000;
 
 pub fn router_routes(router: axum::Router<SharedState>) -> axum::Router<SharedState> {
     router
@@ -1188,14 +1194,18 @@ async fn trigger_build(
     if !state.config.app_hosting_enabled {
         return Err(AppError::conflict("application hosting is disabled"));
     }
-    // A Jenkinsfile compilation failure happens before the pipeline can claim its
-    // source lease or call our callback endpoint. After a short grace period, an
-    // unclaimed lease is therefore safe to recover and must not block redeploys.
-    // Builds that reached source checkout set source_lease_consumed_at, and builds
-    // applying Kubernetes resources clear their callback token, so neither is
-    // affected by this recovery path.
+    // Reclaim abandoned asynchronous work before enforcing the single active build
+    // invariant. Pipeline compilation failures never claim a source lease, a
+    // cancelled Jenkins job claims it but never calls back, and an API restart can
+    // interrupt the background rollout after the image callback. Each state gets
+    // its own conservative grace period so valid, long-running builds are not
+    // pre-empted.
     let unclaimed_build_deadline =
         DateTime::from_millis(DateTime::now().timestamp_millis() - UNCLAIMED_BUILD_GRACE_MILLIS);
+    let uncalled_build_deadline =
+        DateTime::from_millis(DateTime::now().timestamp_millis() - UNCALLED_BUILD_GRACE_MILLIS);
+    let unfinished_rollout_deadline =
+        DateTime::from_millis(DateTime::now().timestamp_millis() - UNFINISHED_ROLLOUT_GRACE_MILLIS);
     state
         .application_builds
         .update_many(
@@ -1209,6 +1219,44 @@ async fn trigger_build(
                 "$set": {
                     "status": "failed",
                     "message": "Jenkins did not claim the source lease before the build grace period expired",
+                    "finished_at": DateTime::now(),
+                },
+            },
+        )
+        .await?;
+    state
+        .application_builds
+        .update_many(
+            doc! {
+                "application_id": app.id,
+                "status": {"$in": ["queued", "running"]},
+                "source_lease_consumed_at": {"$ne": null},
+                "callback_token_hash": {"$ne": null},
+                "created_at": {"$lt": uncalled_build_deadline},
+            },
+            doc! {
+                "$set": {
+                    "status": "failed",
+                    "message": "Jenkins did not report a build result before the callback grace period expired",
+                    "finished_at": DateTime::now(),
+                },
+            },
+        )
+        .await?;
+    state
+        .application_builds
+        .update_many(
+            doc! {
+                "application_id": app.id,
+                "status": "running",
+                "callback_token_hash": null,
+                "image_digest_ref": {"$ne": null},
+                "created_at": {"$lt": unfinished_rollout_deadline},
+            },
+            doc! {
+                "$set": {
+                    "status": "failed",
+                    "message": "Kubernetes rollout did not finish before the recovery grace period expired",
                     "finished_at": DateTime::now(),
                 },
             },
