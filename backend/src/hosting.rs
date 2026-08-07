@@ -1231,7 +1231,10 @@ async fn trigger_build(
                 "application_id": app.id,
                 "status": {"$in": ["queued", "running"]},
                 "source_lease_consumed_at": {"$ne": null},
-                "callback_token_hash": {"$ne": null},
+                // Older build records created before callback tokens were stored
+                // must be recoverable too. The absence of an image is the durable
+                // signal that Jenkins never reached the deployment callback.
+                "image_digest_ref": null,
                 "created_at": {"$lt": uncalled_build_deadline},
             },
             doc! {
