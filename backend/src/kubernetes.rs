@@ -1637,15 +1637,30 @@ pub async fn apply_hosted_application(
         "kust.dev/application-id": application.id.to_hex(),
         "kust.dev/application-slug": application.slug,
     });
+    let probe = json!({
+        "httpGet": {"path": application.health_path, "port": "http", "scheme": application.health_scheme}
+    });
+    let security_context = if application.runtime_profile == "root_compatible" {
+        // Some supported upstream images, including LinuxServer images, use an
+        // init process that manages users and groups before starting the app.
+        // This profile is an explicit opt-in for that compatibility contract.
+        serde_json::Value::Null
+    } else {
+        json!({"allowPrivilegeEscalation": false, "readOnlyRootFilesystem": false, "capabilities": {"drop": ["ALL"]}})
+    };
+    let mut container = json!({
+        "name": "app", "image": image_digest_ref,
+        "ports": [{"containerPort": application.container_port, "name": "http"}],
+        "readinessProbe": {"httpGet": probe["httpGet"], "periodSeconds": 8},
+        "livenessProbe": {"httpGet": probe["httpGet"], "periodSeconds": 16},
+        "startupProbe": {"httpGet": probe["httpGet"], "periodSeconds": 5, "failureThreshold": 30}
+    });
+    if !security_context.is_null() {
+        container["securityContext"] = security_context;
+    }
     let mut pod_spec = json!({
         "securityContext": {"runAsNonRoot": application.runtime_profile != "root_compatible"},
-        "containers": [{
-            "name": "app", "image": image_digest_ref,
-            "ports": [{"containerPort": application.container_port, "name": "http"}],
-            "securityContext": {"allowPrivilegeEscalation": false, "readOnlyRootFilesystem": false, "capabilities": {"drop": ["ALL"]}},
-            "readinessProbe": {"httpGet": {"path": application.health_path, "port": "http", "scheme": application.health_scheme}, "initialDelaySeconds": 3, "periodSeconds": 8},
-            "livenessProbe": {"httpGet": {"path": application.health_path, "port": "http", "scheme": application.health_scheme}, "initialDelaySeconds": 12, "periodSeconds": 16}
-        }]
+        "containers": [container]
     });
     if application.runtime_profile == "root_compatible" {
         pod_spec
