@@ -31,6 +31,7 @@ use crate::{
 // one-time source lease valid for the full pipeline window plus a small queue buffer.
 const SOURCE_LEASE_TTL_MILLIS: i64 = 60 * 60 * 1_000;
 const CALLBACK_TOKEN_TTL_MILLIS: i64 = 90 * 60 * 1_000;
+const UNCLAIMED_BUILD_GRACE_MILLIS: i64 = 15 * 60 * 1_000;
 
 pub fn router_routes(router: axum::Router<SharedState>) -> axum::Router<SharedState> {
     router
@@ -1187,21 +1188,27 @@ async fn trigger_build(
     if !state.config.app_hosting_enabled {
         return Err(AppError::conflict("application hosting is disabled"));
     }
-    // A Jenkinsfile compilation failure happens before the pipeline can call our
-    // callback endpoint. Once its callback token has expired, the build can no
-    // longer make progress and must not block the application's next deployment.
+    // A Jenkinsfile compilation failure happens before the pipeline can claim its
+    // source lease or call our callback endpoint. After a short grace period, an
+    // unclaimed lease is therefore safe to recover and must not block redeploys.
+    // Builds that reached source checkout set source_lease_consumed_at, and builds
+    // applying Kubernetes resources clear their callback token, so neither is
+    // affected by this recovery path.
+    let unclaimed_build_deadline =
+        DateTime::from_millis(DateTime::now().timestamp_millis() - UNCLAIMED_BUILD_GRACE_MILLIS);
     state
         .application_builds
         .update_many(
             doc! {
                 "application_id": app.id,
                 "status": {"$in": ["queued", "running"]},
-                "callback_token_expires_at": {"$lt": DateTime::now()},
+                "source_lease_consumed_at": null,
+                "created_at": {"$lt": unclaimed_build_deadline},
             },
             doc! {
                 "$set": {
                     "status": "failed",
-                    "message": "Build callback expired before Jenkins reported a terminal result",
+                    "message": "Jenkins did not claim the source lease before the build grace period expired",
                     "finished_at": DateTime::now(),
                 },
             },
