@@ -73,6 +73,12 @@ server {
         # Under a managed subpath that would leave the application and reach
         # Kust's own auth page, so preserve the application root explicitly.
         sub_filter 'window.location.href="/"' 'window.location.href="${KUST_APP_ROUTE_PATH}/"';
+        # SvelteKit treats a route outside `base` as an external navigation and
+        # assigns an absolute same-origin URL to location.href. Keep that
+        # fallback inside the managed route instead of sending the browser to
+        # the host application's /auth or /error pages.
+        sub_filter 'location.replace(e.href)' 'location.replace(e.href.startsWith(location.origin+"/")&&e.pathname.indexOf("${KUST_APP_ROUTE_PATH}/")!==0?location.origin+"${KUST_APP_ROUTE_PATH}"+e.href.slice(location.origin.length):e.href)';
+        sub_filter 'location.href=e.href' 'location.href=e.href.startsWith(location.origin+"/")&&e.pathname.indexOf("${KUST_APP_ROUTE_PATH}/")!==0?location.origin+"${KUST_APP_ROUTE_PATH}"+e.href.slice(location.origin.length):e.href';
 
         # Keep runtime-generated root-relative API, asset, and WebSocket URLs
         # inside the managed application route.
