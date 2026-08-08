@@ -53,10 +53,11 @@ server {
         # absolute asset/API URLs without accepting user-provided proxy config.
         proxy_set_header Accept-Encoding "";
         sub_filter_once off;
-        # Open WebUI and other modern Vite/Svelte applications serve ES modules
-        # as text/javascript. Rewrite all common JavaScript MIME types so a
-        # module cannot navigate back to the host root (for example /error).
-        sub_filter_types text/html text/css application/javascript application/x-javascript text/javascript application/json;
+        # Only rewrite declarative documents. Rewriting JavaScript text is not
+        # safe: a URL-looking fragment can also be part of a regular expression
+        # literal, which breaks parsers such as code-server's workbench. The
+        # HTML bridge below handles runtime fetch and WebSocket requests.
+        sub_filter_types text/html text/css application/json;
         sub_filter '"/' '"${KUST_APP_ROUTE_PATH}/';
         sub_filter "'/" "'${KUST_APP_ROUTE_PATH}/";
         sub_filter 'url(/' 'url(${KUST_APP_ROUTE_PATH}/';
