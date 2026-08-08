@@ -693,9 +693,12 @@ fn validate_app_request(
     ) {
         return Err(AppError::bad_request("unsupported build mode"));
     }
-    if !(1..=65535).contains(&request.container_port) || !(1..=100).contains(&request.replicas) {
+    if !(1..=65535).contains(&request.container_port)
+        || request.container_port == 18080
+        || !(1..=100).contains(&request.replicas)
+    {
         return Err(AppError::bad_request(
-            "container port or replicas is invalid",
+            "container port or replicas is invalid; port 18080 is reserved by Kust",
         ));
     }
     if matches!(request.build_mode.as_str(), "static" | "custom") && request.container_port != 8080
@@ -1049,8 +1052,10 @@ async fn update_application(
         app.build_mode = v;
     }
     if let Some(v) = request.container_port {
-        if !(1..=65535).contains(&v) {
-            return Err(AppError::bad_request("container port is invalid"));
+        if !(1..=65535).contains(&v) || v == 18080 {
+            return Err(AppError::bad_request(
+                "container port is invalid; port 18080 is reserved by Kust",
+            ));
         }
         app.container_port = v;
     }

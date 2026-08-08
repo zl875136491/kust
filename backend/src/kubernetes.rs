@@ -1666,6 +1666,10 @@ pub async fn apply_hosted_application(
         "name": "app", "image": image_digest_ref,
         "ports": [{"containerPort": application.container_port, "name": port_name}],
         "env": application.runtime_environment.iter().map(|(name, value)| json!({"name": name, "value": value})).collect::<Vec<_>>(),
+        "resources": {
+            "requests": {"cpu": application.cpu_request, "memory": application.memory_request},
+            "limits": {"cpu": application.cpu_limit, "memory": application.memory_limit}
+        },
         "readinessProbe": {"httpGet": probe["httpGet"], "periodSeconds": 8},
         "livenessProbe": {"httpGet": probe["httpGet"], "periodSeconds": 16},
         "startupProbe": {"httpGet": probe["httpGet"], "periodSeconds": 5, "failureThreshold": 120}
