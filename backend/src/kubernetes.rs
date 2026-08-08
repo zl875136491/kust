@@ -1707,6 +1707,10 @@ pub async fn apply_hosted_application(
         "metadata": {"name": application.slug, "namespace": application.namespace, "labels": labels},
         "spec": {
             "replicas": application.replicas,
+            // A hosted application must remain accessible throughout a rollout.
+            // With one replica the default rolling update may remove the old
+            // Pod before an expensive first start (such as Open WebUI) is ready.
+            "strategy": {"type": "RollingUpdate", "rollingUpdate": {"maxUnavailable": 0, "maxSurge": 1}},
             "selector": {"matchLabels": {"app.kubernetes.io/name": application.slug}},
             "template": {
                 "metadata": {"labels": labels},
