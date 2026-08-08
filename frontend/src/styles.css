@@ -649,15 +649,23 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 0; accent-color: var
 .hosting-route span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hosting-route:hover { color: var(--accent); }
 .hosting-app-actions { display: flex; gap: 4px; }
-.modal--hosting { display: flex; flex-direction: column; height: min(88vh, 920px); max-height: 88vh; }
-.modal--hosting .modal__body { flex: 1; min-height: 0; max-height: none; }
-.hosting-form { display: grid; gap: 12px; }
+.modal--hosting { display: flex; flex-direction: column; max-height: min(94vh, 1060px); }
+.modal--hosting .modal__body { min-height: 0; max-height: calc(94vh - 134px); }
+.hosting-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "source deployment" "build build"; gap: 12px; }
+.hosting-form > section:nth-child(1) { grid-area: source; }
+.hosting-form > section:nth-child(2) { grid-area: build; }
+.hosting-form > section:nth-child(3) { grid-area: deployment; }
 .hosting-form > section { overflow: hidden; border: 1px solid var(--border); border-radius: 10px; }
 .hosting-form > section > header { display: flex; align-items: center; gap: 9px; min-height: 49px; padding: 9px 11px; color: var(--accent); border-bottom: 1px solid var(--border); }
 .hosting-form > section > header > div { display: grid; gap: 2px; }
 .hosting-form > section > header strong { color: var(--text); font-size: 11px; }
 .hosting-form > section > header span { color: var(--text-muted); font-size: 9px; }
 .hosting-form > section > .form-grid, .hosting-form > section > .hosting-form-grid, .hosting-form > section > .build-mode-grid { margin: 11px; }
+.hosting-form > section > .hosting-form__repository { margin: 0 11px 11px; }
+.hosting-form .field > .select-menu { display: flex; width: 100%; min-height: 38px; padding: 0 10px; background: var(--surface-soft); border: 1px solid var(--border); border-radius: 10px; box-shadow: inset 0 1px 0 var(--glass-edge); }
+.hosting-form .field > .select-menu:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.hosting-form .field > .select-menu__label { display: none; }
+.hosting-form .field > .select-menu .select-menu__trigger { min-height: 36px; font-size: 12px; }
 .field--read-only { justify-content: end; }
 .field--read-only strong { display: flex; align-items: center; min-height: 35px; padding: 0 10px; color: var(--text-muted); background: var(--surface-soft); border: 1px solid var(--border); border-radius: 8px; font-size: 10px; font-weight: 500; }
 .build-mode-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
@@ -666,13 +674,30 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 0; accent-color: var
 .build-mode-grid button.is-active { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 36%, var(--border)); box-shadow: inset 0 1px 0 var(--glass-specular-soft); }
 .build-mode-grid strong { color: inherit; font-size: 10px; }
 .build-mode-grid small { color: var(--text-muted); font-size: 8px; line-height: 1.35; }
-.hosting-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.check-field { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: start; gap: 8px; min-height: 38px; padding-top: 3px; cursor: pointer; }
-.check-field input { margin: 2px 0 0; accent-color: var(--accent); }
-.check-field span { display: grid; gap: 3px; }
-.check-field strong { font-size: 10px; }
-.check-field small { color: var(--text-muted); font-size: 8px; line-height: 1.35; }
+.hosting-build-editor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(310px, .9fr); gap: 12px; margin: 0 11px 11px; }
+.hosting-build-editor__environment textarea { height: 236px; min-height: 236px; padding: 10px; color: var(--text); background: var(--surface-soft); border: 1px solid var(--border); border-radius: 10px; font-family: "SFMono-Regular", Consolas, monospace; font-size: 11px; line-height: 1.55; resize: none; }
+.hosting-build-editor__environment textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); outline: 0; }
+.hosting-build-editor__settings { display: grid; grid-template-rows: repeat(4, 56px); align-content: start; gap: 10px; }
+.hosting-switch-field { min-height: 56px; }
+.hosting-switch-control { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; height: 38px; padding: 0 10px; color: var(--text); background: var(--surface-soft); border: 1px solid var(--border); border-radius: 10px; cursor: pointer; }
+.hosting-switch-control small { overflow: hidden; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; font-size: 9px; line-height: 1.4; }
+.hosting-switch-control input { position: absolute; opacity: 0; pointer-events: none; }
+.hosting-switch-control > i { position: relative; width: 38px; height: 22px; flex: 0 0 38px; background: color-mix(in srgb, var(--text-muted) 28%, transparent); border: 1px solid var(--border); border-radius: 999px; box-shadow: inset 0 1px 2px rgba(0, 0, 0, .16); transition: background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease; }
+.hosting-switch-control > i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; background: #fff; border-radius: 50%; box-shadow: 0 1px 4px rgba(0, 0, 0, .28); transition: transform 180ms cubic-bezier(.2,.8,.2,1); }
+.hosting-switch-control input:checked + i { background: color-mix(in srgb, var(--accent) 78%, #4de9ad); border-color: color-mix(in srgb, var(--accent) 65%, var(--border)); box-shadow: inset 0 1px 1px rgba(255,255,255,.28), 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent); }
+.hosting-switch-control input:checked + i::after { transform: translateX(16px); }
+.hosting-switch-field:has(input:focus-visible) .hosting-switch-control { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.hosting-deployment-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "cluster port" "namespace health" "auto-deploy route"; gap: 12px 10px; margin: 11px; }
+.hosting-deployment-grid__cluster { grid-area: cluster; }
+.hosting-deployment-grid__namespace { grid-area: namespace; }
+.hosting-deployment-grid__port { grid-area: port; }
+.hosting-deployment-grid__health { grid-area: health; }
+.hosting-deployment-grid__route { grid-area: route; }
+.hosting-deployment-grid__auto-deploy { grid-area: auto-deploy; }
 .credentials-modal { display: grid; gap: 12px; }
+.credentials-modal .field > .select-menu, .hosting-compatibility .field > .select-menu { display: flex; width: 100%; min-height: 38px; padding: 0 10px; background: var(--surface-soft); border: 1px solid var(--border); border-radius: 10px; box-shadow: inset 0 1px 0 var(--glass-edge); }
+.credentials-modal .field > .select-menu:focus-within, .hosting-compatibility .field > .select-menu:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.credentials-modal .field > .select-menu .select-menu__trigger, .hosting-compatibility .field > .select-menu .select-menu__trigger { min-height: 36px; font-size: 12px; }
 .credentials-modal textarea { min-height: 92px; padding: 9px 10px; color: var(--text); background: var(--surface-soft); border: 1px solid var(--border); border-radius: 8px; font-family: "SFMono-Regular", Consolas, monospace; font-size: 10px; resize: vertical; }
 .credential-list { display: grid; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .credential-list > div { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 9px; min-height: 52px; padding: 9px; border-bottom: 1px solid var(--border); }
@@ -1394,6 +1419,9 @@ kbd,
   .container-spec-list dl > div:last-child { border-bottom: 0; }
   .detail-table { min-width: 680px; }
   .form-grid { grid-template-columns: 1fr; }
+  .hosting-form { grid-template-columns: 1fr; grid-template-areas: "source" "build" "deployment"; }
+  .hosting-build-editor { grid-template-columns: 1fr; }
+  .hosting-deployment-grid { grid-template-columns: 1fr; grid-template-areas: "cluster" "namespace" "auto-deploy" "port" "health" "route"; }
   .modal-backdrop { padding: 7px; }
   .modal__body { padding: 12px; }
   .yaml-editor textarea { min-height: 330px; }
