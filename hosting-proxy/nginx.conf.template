@@ -56,10 +56,14 @@ server {
         # Open WebUI and other modern Vite/Svelte applications serve ES modules
         # as text/javascript. Rewrite all common JavaScript MIME types so a
         # module cannot navigate back to the host root (for example /error).
-        sub_filter_types text/css application/javascript application/x-javascript text/javascript application/json;
+        sub_filter_types text/html text/css application/javascript application/x-javascript text/javascript application/json;
         sub_filter '"/' '"${KUST_APP_ROUTE_PATH}/';
         sub_filter "'/" "'${KUST_APP_ROUTE_PATH}/";
         sub_filter 'url(/' 'url(${KUST_APP_ROUTE_PATH}/';
+
+        # Keep runtime-generated root-relative API, asset, and WebSocket URLs
+        # inside the managed application route.
+        sub_filter '<head>' '<head><script>(function(){var p="${KUST_APP_ROUTE_PATH}",s=String.fromCharCode(47),f=window.fetch;function q(i){var u=typeof i==="string"?i:i&&i.url;if(typeof u==="string"&&u.charAt(0)===s&&u.indexOf(p+s)!==0){var v=p+u;return typeof i==="string"?v:new Request(v,i)}}window.fetch=function(i,n){return f.call(this,q(i)||i,n)};var w=window.WebSocket;if(w){var C=function(u,n){if(typeof u==="string"){var x=new URL(u,window.location.href);if(x.pathname.charAt(0)===s&&x.pathname.indexOf(p+s)!==0){x.pathname=p+x.pathname;u=x.href}}return n===void 0?new w(u):new w(u,n)};C.prototype=w.prototype;window.WebSocket=C}})();</script>';
 
         # code-server emits Location: ./?folder=...; preserve the app prefix.
         proxy_redirect ~^\./(.*)$ ${KUST_APP_ROUTE_PATH}/$1;
