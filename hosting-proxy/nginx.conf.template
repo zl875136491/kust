@@ -62,6 +62,10 @@ server {
         sub_filter 'src="/' 'src="${KUST_APP_ROUTE_PATH}/';
         sub_filter 'action="/' 'action="${KUST_APP_ROUTE_PATH}/';
         sub_filter 'url(/' 'url(${KUST_APP_ROUTE_PATH}/';
+        # SvelteKit applications keep their runtime base in an inline boot
+        # script. Without rewriting it, dynamic imports resolve at the host
+        # root (/_app/...) and bypass the managed application path.
+        sub_filter 'base: ""' 'base: "${KUST_APP_ROUTE_PATH}"';
 
         # Keep runtime-generated root-relative API, asset, and WebSocket URLs
         # inside the managed application route.

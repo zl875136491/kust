@@ -1798,6 +1798,7 @@ pub async fn wait_for_hosted_application_ready(
 ) -> Result<(), AppError> {
     let deadline = Instant::now() + timeout;
     let deployment_api: Api<Deployment> = Api::namespaced(client.clone(), &application.namespace);
+    let replica_set_api: Api<ReplicaSet> = Api::namespaced(client.clone(), &application.namespace);
 
     loop {
         let deployment = deployment_api.get(&application.slug).await?;
@@ -1815,9 +1816,48 @@ pub async fn wait_for_hosted_application_ready(
             .and_then(|status| status.observed_generation)
             .unwrap_or_default();
         let generation = deployment.metadata.generation.unwrap_or_default();
+        let current_revision = deployment
+            .metadata
+            .annotations
+            .as_ref()
+            .and_then(|annotations| annotations.get("deployment.kubernetes.io/revision"));
+        let current_replica_set_ready = if let Some(revision) = current_revision {
+            replica_set_api
+                .list(
+                    &ListParams::default()
+                        .labels(&format!("app.kubernetes.io/name={}", application.slug)),
+                )
+                .await?
+                .items
+                .into_iter()
+                .find(|replica_set| {
+                    replica_set
+                        .metadata
+                        .annotations
+                        .as_ref()
+                        .and_then(|annotations| {
+                            annotations.get("deployment.kubernetes.io/revision")
+                        })
+                        .is_some_and(|candidate| candidate == revision)
+                })
+                .is_some_and(|replica_set| {
+                    let replica_status = replica_set.status.as_ref();
+                    replica_status
+                        .and_then(|status| status.ready_replicas)
+                        .unwrap_or(0)
+                        >= desired
+                        && replica_status
+                            .and_then(|status| status.available_replicas)
+                            .unwrap_or(0)
+                            >= desired
+                })
+        } else {
+            false
+        };
         if observed >= generation
             && ready >= desired
             && updated >= desired
+            && current_replica_set_ready
             && hosted_route_accepted(client.clone(), application).await?
         {
             return Ok(());
