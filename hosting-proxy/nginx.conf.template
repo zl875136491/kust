@@ -74,6 +74,11 @@ server {
         # host application, so send the browser directly to its own login
         # route with a full page navigation.
         sub_filter 'window.location.href="/"' 'window.location.href="${KUST_APP_ROUTE_PATH}/auth"';
+        # For a SvelteKit application compiled with an empty base, `goto` sees
+        # a root-relative path as external once it is mounted below /apps. Use
+        # a full-page navigation to the prefixed path instead. The upstream
+        # server then serves the intended route without crossing into Kust.
+        sub_filter 'function qn(e,t={}){return e=new URL(Ge(e))' 'function qn(e,t={}){if(typeof e==="string"&&U&&e.charAt(0)==="/"&&e.indexOf(U+"/")!==0){location.href=U+e;return Promise.resolve()}return e=new URL(Ge(e))';
 
         # Keep runtime-generated root-relative API, asset, and WebSocket URLs
         # inside the managed application route.
