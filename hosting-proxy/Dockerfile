@@ -21,4 +21,4 @@ RUN chmod 0755 /usr/local/bin/kust-proxy-entrypoint
 USER 101:101
 ENTRYPOINT ["/usr/local/bin/kust-proxy-entrypoint"]
 
-EXPOSE 8080
+EXPOSE 18080

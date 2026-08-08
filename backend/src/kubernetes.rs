@@ -1646,6 +1646,10 @@ pub async fn apply_hosted_application(
     } else {
         "http"
     };
+    // Containers in one Pod share a network namespace. The public Service
+    // still exposes 8080, while the platform-owned proxy listens on a reserved
+    // port that cannot collide with a hosted application's own port.
+    const PROXY_CONTAINER_PORT: u16 = 18080;
     let proxy_port_name = "proxy";
     let probe = json!({
         "httpGet": {"path": application.health_path, "port": port_name, "scheme": application.health_scheme}
@@ -1672,7 +1676,7 @@ pub async fn apply_hosted_application(
     let proxy_container = json!({
         "name": "kust-proxy",
         "image": proxy_image,
-        "ports": [{"containerPort": 8080, "name": proxy_port_name}],
+        "ports": [{"containerPort": PROXY_CONTAINER_PORT, "name": proxy_port_name}],
         "env": [
             {"name": "NGINX_ENVSUBST_FILTER", "value": "^KUST_APP_"},
             {"name": "KUST_APP_ROUTE_PATH", "value": application.route_path},
