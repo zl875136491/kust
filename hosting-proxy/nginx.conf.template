@@ -53,13 +53,14 @@ server {
         # absolute asset/API URLs without accepting user-provided proxy config.
         proxy_set_header Accept-Encoding "";
         sub_filter_once off;
-        # Only rewrite declarative documents. Rewriting JavaScript text is not
-        # safe: a URL-looking fragment can also be part of a regular expression
-        # literal, which breaks parsers such as code-server's workbench. The
-        # HTML bridge below handles runtime fetch and WebSocket requests.
+        # Rewrite only URL-bearing markup attributes and CSS URLs. Generic
+        # quote-prefix replacement also touches inline scripts, which corrupts
+        # applications such as code-server. The HTML bridge below handles
+        # runtime fetch and WebSocket requests.
         sub_filter_types text/html text/css application/json;
-        sub_filter '"/' '"${KUST_APP_ROUTE_PATH}/';
-        sub_filter "'/" "'${KUST_APP_ROUTE_PATH}/";
+        sub_filter 'href="/' 'href="${KUST_APP_ROUTE_PATH}/';
+        sub_filter 'src="/' 'src="${KUST_APP_ROUTE_PATH}/';
+        sub_filter 'action="/' 'action="${KUST_APP_ROUTE_PATH}/';
         sub_filter 'url(/' 'url(${KUST_APP_ROUTE_PATH}/';
 
         # Keep runtime-generated root-relative API, asset, and WebSocket URLs
