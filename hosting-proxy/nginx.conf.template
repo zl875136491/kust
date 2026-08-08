@@ -66,6 +66,9 @@ server {
         # script. Without rewriting it, dynamic imports resolve at the host
         # root (/_app/...) and bypass the managed application path.
         sub_filter 'base: ""' 'base: "${KUST_APP_ROUTE_PATH}"';
+        # SvelteKit's boot script imports entry modules with absolute URLs;
+        # rewrite those imports as well as the preload links above.
+        sub_filter 'import("/' 'import("${KUST_APP_ROUTE_PATH}/';
 
         # Keep runtime-generated root-relative API, asset, and WebSocket URLs
         # inside the managed application route.
