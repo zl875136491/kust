@@ -57,7 +57,7 @@ server {
         # quote-prefix replacement also touches inline scripts, which corrupts
         # applications such as code-server. The HTML bridge below handles
         # runtime fetch and WebSocket requests.
-        sub_filter_types text/html text/css application/json;
+        sub_filter_types text/html text/css application/json application/javascript text/javascript;
         sub_filter 'href="/' 'href="${KUST_APP_ROUTE_PATH}/';
         sub_filter 'src="/' 'src="${KUST_APP_ROUTE_PATH}/';
         sub_filter 'action="/' 'action="${KUST_APP_ROUTE_PATH}/';
@@ -69,10 +69,14 @@ server {
         # SvelteKit's boot script imports entry modules with absolute URLs;
         # rewrite those imports as well as the preload links above.
         sub_filter 'import("/' 'import("${KUST_APP_ROUTE_PATH}/';
+        # Open WebUI redirects anonymous users with window.location.href="/".
+        # Under a managed subpath that would leave the application and reach
+        # Kust's own auth page, so preserve the application root explicitly.
+        sub_filter 'window.location.href="/"' 'window.location.href="${KUST_APP_ROUTE_PATH}/"';
 
         # Keep runtime-generated root-relative API, asset, and WebSocket URLs
         # inside the managed application route.
-        sub_filter '<head>' '<head><script>(function(){var p="${KUST_APP_ROUTE_PATH}",s=String.fromCharCode(47),f=window.fetch;function q(i){var u=typeof i==="string"?i:i&&i.url;if(typeof u==="string"&&u.charAt(0)===s&&u.indexOf(p+s)!==0){var v=p+u;return typeof i==="string"?v:new Request(v,i)}}window.fetch=function(i,n){return f.call(this,q(i)||i,n)};var w=window.WebSocket;if(w){var C=function(u,n){if(typeof u==="string"){var x=new URL(u,window.location.href);if(x.pathname.charAt(0)===s&&x.pathname.indexOf(p+s)!==0){x.pathname=p+x.pathname;u=x.href}}return n===void 0?new w(u):new w(u,n)};C.prototype=w.prototype;window.WebSocket=C}})();</script>';
+        sub_filter '<head>' '<head><script>(function(){var p="${KUST_APP_ROUTE_PATH}",s=String.fromCharCode(47),f=window.fetch;function q(i){var u=typeof i==="string"?i:i&&i.url;if(typeof u==="string"&&u.charAt(0)===s&&u.indexOf(p+s)!==0){var v=p+u;return typeof i==="string"?v:new Request(v,i)}}function n(i){if(typeof i!=="string"||i.charAt(0)!==s||i.indexOf(p+s)===0||i===p)return i;return p+i}window.fetch=function(i,n){return f.call(this,q(i)||i,n)};var w=window.WebSocket;if(w){var C=function(u,n){if(typeof u==="string"){var x=new URL(u,window.location.href);if(x.pathname.charAt(0)===s&&x.pathname.indexOf(p+s)!==0){x.pathname=p+x.pathname;u=x.href}}return n===void 0?new w(u):new w(u,n)};C.prototype=w.prototype;window.WebSocket=C}var l=window.Location&&Location.prototype;if(l){var h=Object.getOwnPropertyDescriptor(l,"href");if(h&&h.set&&h.get)try{Object.defineProperty(l,"href",{configurable:h.configurable,enumerable:h.enumerable,get:h.get,set:function(i){return h.set.call(this,n(i))}})}catch(i){}["assign","replace"].forEach(function(i){var o=l[i];if(typeof o==="function")try{l[i]=function(u){return o.call(this,n(u))}}catch(u){}})}["pushState","replaceState"].forEach(function(i){var o=history[i];if(typeof o==="function")history[i]=function(u,x,v){return o.call(this,u,x,n(v))}});document.addEventListener("click",function(i){var o=i.target&&i.target.closest&&i.target.closest("a[href]");if(o){var u=o.getAttribute("href");if(u)o.setAttribute("href",n(u))}},true)})();</script>';
 
         # code-server emits Location: ./?folder=...; preserve the app prefix.
         proxy_redirect ~^\./(.*)$ ${KUST_APP_ROUTE_PATH}/$1;
