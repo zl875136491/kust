@@ -501,11 +501,14 @@ fn validate_build_environment(environment: &BTreeMap<String, String>) -> Result<
 }
 
 fn validate_runtime_environment(environment: &BTreeMap<String, String>) -> Result<(), AppError> {
+    let root_redirect = environment
+        .get("KUST_APP_ROOT_REDIRECT")
+        .map(String::as_str);
     if environment.len() > 32
         || environment.iter().any(|(key, value)| {
             !valid_build_environment_key(key)
                 || !valid_build_environment_value(value)
-                || key.starts_with("KUST_")
+                || (key.starts_with("KUST_") && key != "KUST_APP_ROOT_REDIRECT")
                 || matches!(
                     key.as_str(),
                     "HTTP_PROXY"
@@ -520,7 +523,25 @@ fn validate_runtime_environment(environment: &BTreeMap<String, String>) -> Resul
             "runtime environment contains an invalid or reserved value",
         ));
     }
+    if let Some(value) = root_redirect {
+        if !valid_hosted_root_redirect(value) {
+            return Err(AppError::bad_request(
+                "KUST_APP_ROOT_REDIRECT must be an application-relative path",
+            ));
+        }
+    }
     Ok(())
+}
+
+fn valid_hosted_root_redirect(value: &str) -> bool {
+    value.starts_with('/')
+        && value.len() <= 160
+        && value != "/"
+        && !value.contains("//")
+        && !value.contains("..")
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'_' | b'-'))
 }
 
 fn validate_runtime_profile(value: &str) -> Result<(), AppError> {
@@ -2060,6 +2081,16 @@ mod tests {
         assert!(validate_git_ref("release..candidate").is_err());
         assert!(validate_relative_directory(Some("dist/client"), "output directory").is_ok());
         assert!(validate_relative_directory(Some("../secrets"), "output directory").is_err());
+    }
+
+    #[test]
+    fn accepts_only_safe_hosted_root_redirects() {
+        assert!(super::valid_hosted_root_redirect("/auth"));
+        assert!(super::valid_hosted_root_redirect("/account/login"));
+        assert!(!super::valid_hosted_root_redirect("/"));
+        assert!(!super::valid_hosted_root_redirect("auth"));
+        assert!(!super::valid_hosted_root_redirect("/../auth"));
+        assert!(!super::valid_hosted_root_redirect("/auth?next=/"));
     }
 
     #[test]

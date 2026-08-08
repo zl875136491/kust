@@ -1665,7 +1665,10 @@ pub async fn apply_hosted_application(
     let mut container = json!({
         "name": "app", "image": image_digest_ref,
         "ports": [{"containerPort": application.container_port, "name": port_name}],
-        "env": application.runtime_environment.iter().map(|(name, value)| json!({"name": name, "value": value})).collect::<Vec<_>>(),
+        "env": application.runtime_environment.iter()
+            .filter(|(name, _)| name.as_str() != "KUST_APP_ROOT_REDIRECT")
+            .map(|(name, value)| json!({"name": name, "value": value}))
+            .collect::<Vec<_>>(),
         "resources": {
             "requests": {"cpu": application.cpu_request, "memory": application.memory_request},
             "limits": {"cpu": application.cpu_limit, "memory": application.memory_limit}
@@ -1685,7 +1688,8 @@ pub async fn apply_hosted_application(
             {"name": "NGINX_ENVSUBST_FILTER", "value": "^KUST_APP_"},
             {"name": "KUST_APP_ROUTE_PATH", "value": application.route_path},
             {"name": "KUST_APP_UPSTREAM_PORT", "value": application.container_port.to_string()},
-            {"name": "KUST_APP_UPSTREAM_SCHEME", "value": application.service_scheme.to_lowercase()}
+            {"name": "KUST_APP_UPSTREAM_SCHEME", "value": application.service_scheme.to_lowercase()},
+            {"name": "KUST_APP_ROOT_REDIRECT", "value": application.runtime_environment.get("KUST_APP_ROOT_REDIRECT").cloned().unwrap_or_default()}
         ],
         "readinessProbe": {"httpGet": {"path": "/_kust_proxy/healthz", "port": proxy_port_name}, "periodSeconds": 5},
         "livenessProbe": {"httpGet": {"path": "/_kust_proxy/healthz", "port": proxy_port_name}, "periodSeconds": 10},

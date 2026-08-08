@@ -21,6 +21,15 @@ map $http_upgrade $connection_upgrade {
     '' close;
 }
 
+# Applications that need a dedicated entry route can opt in through the
+# validated KUST_APP_ROOT_REDIRECT runtime setting. The map makes the redirect
+# apply only to the application's own trailing-slash root, never to assets,
+# APIs, or nested pages.
+map "$uri:${KUST_APP_ROOT_REDIRECT}" $kust_root_redirect_enabled {
+    default 0;
+    "~^${KUST_APP_ROUTE_PATH}/?:/.+$" 1;
+}
+
 server {
     # Pods share one network namespace. Use a platform-reserved high port so
     # the proxy never collides with an application using the common 8080.
@@ -37,6 +46,9 @@ server {
     }
 
     location / {
+        if ($kust_root_redirect_enabled) {
+            return 302 ${KUST_APP_ROUTE_PATH}${KUST_APP_ROOT_REDIRECT};
+        }
         rewrite ^${KUST_APP_ROUTE_PATH}/?(.*)$ /$1 break;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -69,17 +81,6 @@ server {
         # SvelteKit's boot script imports entry modules with absolute URLs;
         # rewrite those imports as well as the preload links above.
         sub_filter 'import("/' 'import("${KUST_APP_ROUTE_PATH}/';
-        # Open WebUI sends unauthenticated users to its root route. Under a
-        # managed subpath that would either loop at the app root or enter the
-        # host application, so send the browser directly to its own login
-        # route with a full page navigation.
-        sub_filter 'window.location.href="/"' 'window.location.href="${KUST_APP_ROUTE_PATH}/auth"';
-        # For a SvelteKit application compiled with an empty base, `goto` sees
-        # a root-relative path as external once it is mounted below /apps. Use
-        # a full-page navigation to the prefixed path instead. The upstream
-        # server then serves the intended route without crossing into Kust.
-        sub_filter 'function qn(e,t={}){return e=new URL(Ge(e))' 'function qn(e,t={}){if(typeof e==="string"&&U&&e.charAt(0)==="/"&&e.indexOf(U+"/")!==0){location.href=U+e;return Promise.resolve()}return e=new URL(Ge(e))';
-
         # Keep runtime-generated root-relative API, asset, and WebSocket URLs
         # inside the managed application route.
         sub_filter '<head>' '<head><script>(function(){var p="${KUST_APP_ROUTE_PATH}",s=String.fromCharCode(47),f=window.fetch;function q(i){var u=typeof i==="string"?i:i&&i.url;if(typeof u==="string"&&u.charAt(0)===s&&u.indexOf(p+s)!==0){var v=p+u;return typeof i==="string"?v:new Request(v,i)}}function n(i){if(typeof i!=="string"||i.charAt(0)!==s||i.indexOf(p+s)===0||i===p)return i;return p+i}window.fetch=function(i,n){return f.call(this,q(i)||i,n)};var w=window.WebSocket;if(w){var C=function(u,n){if(typeof u==="string"){var x=new URL(u,window.location.href);if(x.pathname.charAt(0)===s&&x.pathname.indexOf(p+s)!==0){x.pathname=p+x.pathname;u=x.href}}return n===void 0?new w(u):new w(u,n)};C.prototype=w.prototype;window.WebSocket=C}var l=window.Location&&Location.prototype;if(l){var h=Object.getOwnPropertyDescriptor(l,"href");if(h&&h.set&&h.get)try{Object.defineProperty(l,"href",{configurable:h.configurable,enumerable:h.enumerable,get:h.get,set:function(i){return h.set.call(this,n(i))}})}catch(i){}["assign","replace"].forEach(function(i){var o=l[i];if(typeof o==="function")try{l[i]=function(u){return o.call(this,n(u))}}catch(u){}})}["pushState","replaceState"].forEach(function(i){var o=history[i];if(typeof o==="function")history[i]=function(u,x,v){return o.call(this,u,x,n(v))}});document.addEventListener("click",function(i){var o=i.target&&i.target.closest&&i.target.closest("a[href]");if(o){var u=o.getAttribute("href");if(u)o.setAttribute("href",n(u))}},true)})();</script>';
