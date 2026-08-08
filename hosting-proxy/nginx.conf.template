@@ -69,15 +69,11 @@ server {
         # SvelteKit's boot script imports entry modules with absolute URLs;
         # rewrite those imports as well as the preload links above.
         sub_filter 'import("/' 'import("${KUST_APP_ROUTE_PATH}/';
-        # Open WebUI redirects anonymous users with window.location.href="/".
-        # Under a managed subpath that would leave the application and reach
-        # Kust's own auth page, so preserve the application root explicitly.
-        sub_filter 'window.location.href="/"' 'window.location.href="${KUST_APP_ROUTE_PATH}/"';
-        # Some SvelteKit applications were built with an empty base and call
-        # goto("/auth") (or other root routes) at runtime. Normalize those
-        # paths at the framework navigation boundary, before SvelteKit decides
-        # that the route is external to this hosted application.
-        sub_filter 'function qn(e,t={}){return e=new URL(Ge(e))' 'function qn(e,t={}){return typeof e==="string"&&U&&e.charAt(0)==="/"&&e.indexOf(U+"/")!==0&&(e=U+e),e=new URL(Ge(e))';
+        # Open WebUI sends unauthenticated users to its root route. Under a
+        # managed subpath that would either loop at the app root or enter the
+        # host application, so send the browser directly to its own login
+        # route with a full page navigation.
+        sub_filter 'window.location.href="/"' 'window.location.href="${KUST_APP_ROUTE_PATH}/auth"';
 
         # Keep runtime-generated root-relative API, asset, and WebSocket URLs
         # inside the managed application route.
