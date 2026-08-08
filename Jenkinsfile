@@ -18,6 +18,7 @@ pipeline {
         HARBOR_REGISTRY = '10.17.158.118'
         BACKEND_IMAGE_REPOSITORY = '10.17.158.118/kust/kust_backend'
         FRONTEND_IMAGE_REPOSITORY = '10.17.158.118/kust/kust_frontend'
+        PROXY_IMAGE_REPOSITORY = '10.17.158.118/kust/kust_app_proxy'
         SOURCE_URL = 'https://github.com/zl875136491/kust'
         KUBE_API = 'https://10.17.158.69:6443'
         KUBE_NAMESPACE = 'custom-apps'
@@ -66,6 +67,7 @@ pipeline {
                     env.IMAGE_TAG = "sha-${revision.take(12)}"
                     env.BACKEND_IMAGE_REF = "${env.BACKEND_IMAGE_REPOSITORY}:${env.IMAGE_TAG}"
                     env.FRONTEND_IMAGE_REF = "${env.FRONTEND_IMAGE_REPOSITORY}:${env.IMAGE_TAG}"
+                    env.PROXY_IMAGE_REF = "${env.PROXY_IMAGE_REPOSITORY}:${env.IMAGE_TAG}"
                     env.BACKEND_CI_IMAGE = "kust-backend-ci:${env.BUILD_NUMBER}-${revision.take(12)}"
                     env.FRONTEND_CI_IMAGE = "kust-frontend-ci:${env.BUILD_NUMBER}-${revision.take(12)}"
                     currentBuild.displayName = env.IMAGE_TAG
@@ -136,10 +138,21 @@ docker build \
   --tag "$FRONTEND_IMAGE_REF" \
   ./frontend
 
+docker build \
+  --provenance=false \
+  --platform linux/amd64 \
+  --build-arg "VCS_REF=$GIT_COMMIT_SHA" \
+  --build-arg "IMAGE_VERSION=$IMAGE_TAG" \
+  --build-arg "SOURCE_URL=$SOURCE_URL" \
+  --tag "$PROXY_IMAGE_REF" \
+  ./hosting-proxy
+
 test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$BACKEND_IMAGE_REF")" = "$GIT_COMMIT_SHA"
 test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.component" }}' "$BACKEND_IMAGE_REF")" = 'backend'
 test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$FRONTEND_IMAGE_REF")" = "$GIT_COMMIT_SHA"
 test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.component" }}' "$FRONTEND_IMAGE_REF")" = 'frontend'
+test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$PROXY_IMAGE_REF")" = "$GIT_COMMIT_SHA"
+test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.component" }}' "$PROXY_IMAGE_REF")" = 'hosting-proxy'
 ''')
             }
         }
@@ -167,19 +180,24 @@ unset HARBOR_USERNAME HARBOR_PASSWORD
 
 docker push "$BACKEND_IMAGE_REF" 2>&1 | tee backend-push.log
 docker push "$FRONTEND_IMAGE_REF" 2>&1 | tee frontend-push.log
+docker push "$PROXY_IMAGE_REF" 2>&1 | tee proxy-push.log
 
 awk '/digest: sha256:/{for (i = 1; i <= NF; i++) if ($i ~ /^sha256:/) {print $i; exit}}' backend-push.log > backend-image.digest
 awk '/digest: sha256:/{for (i = 1; i <= NF; i++) if ($i ~ /^sha256:/) {print $i; exit}}' frontend-push.log > frontend-image.digest
+awk '/digest: sha256:/{for (i = 1; i <= NF; i++) if ($i ~ /^sha256:/) {print $i; exit}}' proxy-push.log > proxy-image.digest
 grep -Eq '^sha256:[0-9a-f]{64}$' backend-image.digest
 grep -Eq '^sha256:[0-9a-f]{64}$' frontend-image.digest
+grep -Eq '^sha256:[0-9a-f]{64}$' proxy-image.digest
 ''')
                 }
 
                 script {
                     env.BACKEND_IMAGE_DIGEST = readFile('backend-image.digest').trim()
                     env.FRONTEND_IMAGE_DIGEST = readFile('frontend-image.digest').trim()
+                    env.PROXY_IMAGE_DIGEST = readFile('proxy-image.digest').trim()
                     env.BACKEND_DIGEST_REF = "${env.BACKEND_IMAGE_REPOSITORY}@${env.BACKEND_IMAGE_DIGEST}"
                     env.FRONTEND_DIGEST_REF = "${env.FRONTEND_IMAGE_REPOSITORY}@${env.FRONTEND_IMAGE_DIGEST}"
+                    env.PROXY_DIGEST_REF = "${env.PROXY_IMAGE_REPOSITORY}@${env.PROXY_IMAGE_DIGEST}"
 
                     writeFile(file: 'images.properties', text: [
                         "GIT_COMMIT=${env.GIT_COMMIT_SHA}",
@@ -187,7 +205,9 @@ grep -Eq '^sha256:[0-9a-f]{64}$' frontend-image.digest
                         "BACKEND_IMAGE=${env.BACKEND_IMAGE_REF}",
                         "BACKEND_DIGEST_REF=${env.BACKEND_DIGEST_REF}",
                         "FRONTEND_IMAGE=${env.FRONTEND_IMAGE_REF}",
-                        "FRONTEND_DIGEST_REF=${env.FRONTEND_DIGEST_REF}"
+                        "FRONTEND_DIGEST_REF=${env.FRONTEND_DIGEST_REF}",
+                        "PROXY_IMAGE=${env.PROXY_IMAGE_REF}",
+                        "PROXY_DIGEST_REF=${env.PROXY_DIGEST_REF}"
                     ].join('\n') + '\n')
                     archiveArtifacts artifacts: 'images.properties', fingerprint: true, onlyIfSuccessful: true
                 }
@@ -205,7 +225,7 @@ grep -Eq '^sha256:[0-9a-f]{64}$' frontend-image.digest
                 withCredentials([string(credentialsId: 'tianjin_k8s_admin_token', variable: 'KUBE_TOKEN')]) {
                     sh(label: 'Deploy /kust_test', script: '''#!/usr/bin/env bash
 set -Eeuo pipefail
-./deploy/k8s/apply.sh test "$BACKEND_DIGEST_REF" "$FRONTEND_DIGEST_REF"
+./deploy/k8s/apply.sh test "$BACKEND_DIGEST_REF" "$FRONTEND_DIGEST_REF" "$PROXY_DIGEST_REF"
 ''')
                 }
             }
@@ -222,7 +242,7 @@ set -Eeuo pipefail
                 withCredentials([string(credentialsId: 'tianjin_k8s_admin_token', variable: 'KUBE_TOKEN')]) {
                     sh(label: 'Deploy /kust', script: '''#!/usr/bin/env bash
 set -Eeuo pipefail
-./deploy/k8s/apply.sh production "$BACKEND_DIGEST_REF" "$FRONTEND_DIGEST_REF"
+./deploy/k8s/apply.sh production "$BACKEND_DIGEST_REF" "$FRONTEND_DIGEST_REF" "$PROXY_DIGEST_REF"
 ''')
                 }
             }
@@ -233,7 +253,7 @@ set -Eeuo pipefail
         always {
             sh '''#!/usr/bin/env bash
 set +e
-for image in "$BACKEND_CI_IMAGE" "$FRONTEND_CI_IMAGE" "$BACKEND_IMAGE_REF" "$FRONTEND_IMAGE_REF"; do
+for image in "$BACKEND_CI_IMAGE" "$FRONTEND_CI_IMAGE" "$BACKEND_IMAGE_REF" "$FRONTEND_IMAGE_REF" "$PROXY_IMAGE_REF"; do
   if [ -n "$image" ]; then
     docker image rm "$image" >/dev/null 2>&1 || true
   fi

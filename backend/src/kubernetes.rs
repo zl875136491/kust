@@ -1626,6 +1626,7 @@ pub async fn apply_hosted_application(
     client: Client,
     application: &HostedApplicationDocument,
     image_digest_ref: &str,
+    proxy_image: &str,
     image_pull_secret: Option<&str>,
 ) -> Result<(), AppError> {
     for kind in ["deployments", "services", "httproutes"] {
@@ -1645,6 +1646,7 @@ pub async fn apply_hosted_application(
     } else {
         "http"
     };
+    let proxy_port_name = "proxy";
     let probe = json!({
         "httpGet": {"path": application.health_path, "port": port_name, "scheme": application.health_scheme}
     });
@@ -1667,9 +1669,25 @@ pub async fn apply_hosted_application(
     if !security_context.is_null() {
         container["securityContext"] = security_context;
     }
+    let proxy_container = json!({
+        "name": "kust-proxy",
+        "image": proxy_image,
+        "ports": [{"containerPort": 8080, "name": proxy_port_name}],
+        "env": [
+            {"name": "NGINX_ENVSUBST_FILTER", "value": "^KUST_APP_"},
+            {"name": "KUST_APP_ROUTE_PATH", "value": application.route_path},
+            {"name": "KUST_APP_UPSTREAM_PORT", "value": application.container_port.to_string()},
+            {"name": "KUST_APP_UPSTREAM_SCHEME", "value": application.service_scheme.to_lowercase()}
+        ],
+        "readinessProbe": {"httpGet": {"path": "/_kust_proxy/healthz", "port": proxy_port_name}, "periodSeconds": 5},
+        "livenessProbe": {"httpGet": {"path": "/_kust_proxy/healthz", "port": proxy_port_name}, "periodSeconds": 10},
+        "volumeMounts": [{"name": "proxy-tmp", "mountPath": "/tmp"}],
+        "securityContext": {"allowPrivilegeEscalation": false, "readOnlyRootFilesystem": false, "capabilities": {"drop": ["ALL"]}}
+    });
     let mut pod_spec = json!({
         "securityContext": {"runAsNonRoot": application.runtime_profile != "root_compatible"},
-        "containers": [container]
+        "containers": [container, proxy_container],
+        "volumes": [{"name": "proxy-tmp", "emptyDir": {}}]
     });
     if application.runtime_profile == "root_compatible" {
         pod_spec
@@ -1695,7 +1713,7 @@ pub async fn apply_hosted_application(
     let service = json!({
         "apiVersion": "v1", "kind": "Service",
         "metadata": {"name": application.slug, "namespace": application.namespace, "labels": labels},
-        "spec": {"selector": {"app.kubernetes.io/name": application.slug}, "ports": [{"name": port_name, "port": application.container_port, "targetPort": port_name, "appProtocol": application.service_scheme.to_lowercase()}]}
+        "spec": {"selector": {"app.kubernetes.io/name": application.slug}, "ports": [{"name": proxy_port_name, "port": 8080, "targetPort": proxy_port_name, "appProtocol": "http"}]}
     });
     let route = json!({
         "apiVersion": "gateway.networking.k8s.io/v1", "kind": "HTTPRoute",
@@ -1705,8 +1723,7 @@ pub async fn apply_hosted_application(
             "hostnames": [application.route_host],
             "rules": [{
                 "matches": [{"path": {"type": "PathPrefix", "value": application.route_path}}],
-                "filters": [{"type": "URLRewrite", "urlRewrite": {"path": {"type": "ReplacePrefixMatch", "replacePrefixMatch": "/"}}}],
-                "backendRefs": [{"name": application.slug, "port": application.container_port}]
+                "backendRefs": [{"name": application.slug, "port": 8080}]
             }]
         }
     });

@@ -530,6 +530,137 @@ fn validate_runtime_profile(value: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+fn hosted_application_proxy_image(state: &SharedState) -> Result<&str, AppError> {
+    const PROXY_REPOSITORY: &str = "10.17.158.118/kust/kust_app_proxy@sha256:";
+    let image =
+        state.config.app_proxy_image.as_deref().ok_or_else(|| {
+            AppError::conflict("application hosting proxy image is not configured")
+        })?;
+    if !valid_digest_reference(image, PROXY_REPOSITORY) {
+        return Err(AppError::conflict(
+            "application hosting proxy image must be a platform immutable digest",
+        ));
+    }
+    Ok(image)
+}
+
+fn hosted_application_public_url(
+    state: &SharedState,
+    application: &HostedApplicationDocument,
+) -> Result<Url, AppError> {
+    let base = state
+        .config
+        .app_public_verify_url
+        .as_deref()
+        .ok_or_else(|| {
+            AppError::conflict("application hosting public verification URL is not configured")
+        })?;
+    public_route_url(base, &application.route_path)
+}
+
+fn public_route_url(base: &str, route_path: &str) -> Result<Url, AppError> {
+    let mut url = Url::parse(base).map_err(|_| {
+        AppError::conflict("application hosting public verification URL is invalid")
+    })?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err(AppError::conflict(
+            "application hosting public verification URL must be an HTTP(S) URL",
+        ));
+    }
+    let path = format!("{}/", route_path.trim_end_matches('/'));
+    url.set_path(&path);
+    url.set_query(None);
+    url.set_fragment(None);
+    Ok(url)
+}
+
+async fn verify_hosted_application_route(
+    state: &SharedState,
+    application: &HostedApplicationDocument,
+) -> Result<(), AppError> {
+    let mut url = hosted_application_public_url(state, application)?;
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .user_agent("Kust/0.1 hosted-route-verifier")
+        .build()
+        .map_err(|error| AppError::internal(format!("unable to create route verifier: {error}")))?;
+    for _ in 0..=3 {
+        let response = client
+            .get(url.clone())
+            .header(reqwest::header::HOST, &application.route_host)
+            .send()
+            .await
+            .map_err(|error| {
+                AppError::upstream(format!("hosted application route request failed: {error}"))
+            })?;
+        let status = response.status();
+        if status.is_redirection() {
+            let location = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok())
+                .ok_or_else(|| {
+                    AppError::upstream("hosted application route redirected without Location")
+                })?;
+            let next = url.join(location).map_err(|_| {
+                AppError::upstream("hosted application route returned an invalid redirect")
+            })?;
+            if next.host_str() != url.host_str()
+                || next.port_or_known_default() != url.port_or_known_default()
+                || !next.path().starts_with(&application.route_path)
+            {
+                return Err(AppError::upstream(
+                    "hosted application route redirected outside its managed path",
+                ));
+            }
+            url = next;
+            continue;
+        }
+        if !status.is_success() {
+            return Err(AppError::upstream(format!(
+                "hosted application route returned {status} at {url}",
+            )));
+        }
+        let body = response.bytes().await.map_err(|error| {
+            AppError::upstream(format!(
+                "hosted application route body could not be read: {error}"
+            ))
+        })?;
+        return (!body.is_empty()).then_some(()).ok_or_else(|| {
+            AppError::upstream(format!(
+                "hosted application route returned an empty response at {url}",
+            ))
+        });
+    }
+    Err(AppError::upstream(
+        "hosted application route exceeded the redirect limit",
+    ))
+}
+
+async fn apply_and_verify_hosted_application(
+    state: &SharedState,
+    application: &HostedApplicationDocument,
+    image_digest_ref: &str,
+) -> Result<(), AppError> {
+    let proxy_image = hosted_application_proxy_image(state)?;
+    let client = state.kube_client(&application.cluster_id.to_hex()).await?;
+    kubernetes::apply_hosted_application(
+        client,
+        application,
+        image_digest_ref,
+        proxy_image,
+        state.config.app_image_pull_secret.as_deref(),
+    )
+    .await?;
+    kubernetes::wait_for_hosted_application_ready(
+        state.kube_client(&application.cluster_id.to_hex()).await?,
+        application,
+        std::time::Duration::from_secs(state.config.app_rollout_timeout_seconds),
+    )
+    .await?;
+    verify_hosted_application_route(state, application).await
+}
+
 fn validate_app_request(
     state: &SharedState,
     request: &CreateHostedApplicationRequest,
@@ -598,6 +729,15 @@ fn validate_app_request(
     validate_build_environment(&request.build_environment)?;
     validate_runtime_environment(&request.runtime_environment)?;
     validate_runtime_profile(&request.runtime_profile)?;
+    hosted_application_proxy_image(state)?;
+    let verify_base = state
+        .config
+        .app_public_verify_url
+        .as_deref()
+        .ok_or_else(|| {
+            AppError::conflict("application hosting public verification URL is not configured")
+        })?;
+    public_route_url(verify_base, "/apps/verification")?;
     normalized_route_path(&state.config.app_route_prefix, &request.route_path, &slug)?;
     let host =
         state.config.app_default_route_host.clone().ok_or_else(|| {
@@ -1132,31 +1272,16 @@ async fn redeploy_application(
     let deployment_app = app.clone();
     let deployment_image = image.clone();
     tokio::spawn(async move {
-        let result = async {
-            let client = deployment_state
-                .kube_client(&deployment_app.cluster_id.to_hex())
-                .await?;
-            kubernetes::apply_hosted_application(
-                client,
-                &deployment_app,
-                &deployment_image,
-                deployment_state.config.app_image_pull_secret.as_deref(),
-            )
-            .await?;
-            kubernetes::wait_for_hosted_application_ready(
-                deployment_state
-                    .kube_client(&deployment_app.cluster_id.to_hex())
-                    .await?,
-                &deployment_app,
-                std::time::Duration::from_secs(deployment_state.config.app_rollout_timeout_seconds),
-            )
-            .await
-        }
+        let result = apply_and_verify_hosted_application(
+            &deployment_state,
+            &deployment_app,
+            &deployment_image,
+        )
         .await;
         let (status, message) = match result {
             Ok(()) => (
                 "succeeded",
-                "Deployment, Service and HTTPRoute are ready".to_string(),
+                "Deployment, Service, HTTPRoute and public application route are ready".to_string(),
             ),
             Err(error) => ("failed", format!("Kubernetes redeployment failed: {error}")),
         };
@@ -1210,20 +1335,7 @@ async fn rollback_application(
         .await?
         .ok_or_else(|| AppError::conflict("no previous successful release is available"))?;
     let image = build.image_digest_ref.clone().unwrap();
-    let client = state.kube_client(&app.cluster_id.to_hex()).await?;
-    kubernetes::apply_hosted_application(
-        client.clone(),
-        &app,
-        &image,
-        state.config.app_image_pull_secret.as_deref(),
-    )
-    .await?;
-    kubernetes::wait_for_hosted_application_ready(
-        state.kube_client(&app.cluster_id.to_hex()).await?,
-        &app,
-        std::time::Duration::from_secs(state.config.app_rollout_timeout_seconds),
-    )
-    .await?;
+    apply_and_verify_hosted_application(&state, &app, &image).await?;
     write_audit(
         &state,
         Some(actor.user.id),
@@ -1697,34 +1809,18 @@ async fn build_callback(
         let deployment_app = app.clone();
         let deployment_image = image.to_string();
         tokio::spawn(async move {
-            let result = async {
-                let client = deployment_state
-                    .kube_client(&deployment_app.cluster_id.to_hex())
-                    .await?;
-                kubernetes::apply_hosted_application(
-                    client,
-                    &deployment_app,
-                    &deployment_image,
-                    deployment_state.config.app_image_pull_secret.as_deref(),
-                )
-                .await?;
-                kubernetes::wait_for_hosted_application_ready(
-                    deployment_state
-                        .kube_client(&deployment_app.cluster_id.to_hex())
-                        .await?,
-                    &deployment_app,
-                    std::time::Duration::from_secs(
-                        deployment_state.config.app_rollout_timeout_seconds,
-                    ),
-                )
-                .await
-            }
+            let result = apply_and_verify_hosted_application(
+                &deployment_state,
+                &deployment_app,
+                &deployment_image,
+            )
             .await;
 
             let (status, message) = match result {
                 Ok(()) => (
                     "succeeded",
-                    "Deployment, Service and HTTPRoute are ready".to_string(),
+                    "Deployment, Service, HTTPRoute and public application route are ready"
+                        .to_string(),
                 ),
                 Err(error) => ("failed", format!("Kubernetes deployment failed: {error}")),
             };
@@ -1959,6 +2055,20 @@ mod tests {
         assert!(validate_git_ref("release..candidate").is_err());
         assert!(validate_relative_directory(Some("dist/client"), "output directory").is_ok());
         assert!(validate_relative_directory(Some("../secrets"), "output directory").is_err());
+    }
+
+    #[test]
+    fn public_route_verification_uses_a_trailing_app_path() {
+        assert_eq!(
+            super::public_route_url(
+                "http://traefik.traefik-system.svc.cluster.local",
+                "/apps/demo"
+            )
+            .unwrap()
+            .as_str(),
+            "http://traefik.traefik-system.svc.cluster.local/apps/demo/"
+        );
+        assert!(super::public_route_url("not a URL", "/apps/demo").is_err());
     }
 
     #[test]

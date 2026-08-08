@@ -72,6 +72,8 @@ spec:
               value: /apps
             - name: KUST_APP_HARBOR_REPOSITORY_PREFIX
               value: 10.17.158.118/kust-apps
+            - name: KUST_APP_PROXY_IMAGE
+              value: __PROXY_IMAGE__
             - name: KUST_APP_IMAGE_PULL_SECRET
               value: kust-harbor
             - name: KUST_APP_ALLOWED_NAMESPACES
@@ -82,6 +84,8 @@ spec:
               value: http://k8s.1oa.com.cn__BASE_PATH__
             - name: KUST_APP_CALLBACK_RESOLVE
               value: k8s.1oa.com.cn:80:10.17.158.71
+            - name: KUST_APP_PUBLIC_VERIFY_URL
+              value: http://traefik.traefik-system.svc.cluster.local
             - name: KUST_APP_ROLLOUT_TIMEOUT_SECONDS
               value: "900"
             - name: KUST_JENKINS_URL

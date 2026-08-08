@@ -322,10 +322,12 @@ npm run dev
 | `KUST_APP_DEFAULT_ROUTE_HOST` | 无 | 托管 HTTPRoute 默认 Host，也是允许的域名边界 |
 | `KUST_APP_ROUTE_PREFIX` | `/apps` | 托管 HTTPRoute 唯一允许使用的路径前缀 |
 | `KUST_APP_HARBOR_REPOSITORY_PREFIX` | 无 | 托管应用镜像前缀，例如 `harbor.internal/kust-apps` |
+| `KUST_APP_PROXY_IMAGE` | 无 | 平台维护的不可变代理镜像 digest；每个托管应用以 sidecar 使用它处理路径前缀 |
 | `KUST_APP_IMAGE_PULL_SECRET` | 无 | 平台预置在允许命名空间中的 Harbor 拉取 Secret 名称 |
 | `KUST_APP_ALLOWED_NAMESPACES` | 无 | 逗号分隔的托管应用命名空间白名单；为空时不额外限制 |
 | `KUST_APP_ALLOWED_GIT_HOSTS` | 无 | 可选的 Git 主机名白名单；为空时仍拒绝 localhost、私有、链路本地和 metadata 地址 |
 | `KUST_APP_ROLLOUT_TIMEOUT_SECONDS` | `180` | Deployment 与 HTTPRoute 就绪的最长等待时间，范围 30-900 秒 |
+| `KUST_APP_PUBLIC_VERIFY_URL` | 无 | API Pod 可访问的 Gateway URL；每次 rollout 通过应用 Host 与 URL 实际请求验证 |
 | `RUST_LOG` | `kust_api=info,tower_http=info` | Rust tracing 过滤器 |
 | `VITE_API_URL` | 当前站点的 `<base>/api` | 前端编译时 API 根地址 |
 | `API_UPSTREAM` | `api:8080` | 前端容器 Nginx 的 API 上游 |
@@ -345,6 +347,8 @@ Git repository -> Jenkins build -> Harbor digest
 ```
 
 Kust 是控制面：应用定义、Git 凭证元数据、构建记录和审计日志都保存在 MongoDB。Jenkins 仅用于隔离构建与推送镜像，**不持有 Kubernetes 集群凭证**。Jenkins 将不可变镜像 digest 回调给 Kust 后，Kust 才使用目标集群已加密保存的 kubeconfig 以 Server-Side Apply 创建或更新资源。
+
+每个托管应用附带 Kust 维护的非 root 代理 sidecar。HTTPRoute 仅指向该 sidecar；它移除外部的 `/apps/<slug>` 前缀后再转发到用户容器，并修正绝对静态资源、API 路径、Cookie Path 与相对重定向。这让假设部署在 `/` 的主流镜像也能稳定运行在共享 Host 的路径前缀下，例如 Open WebUI 与 code-server。rollout 只有在 Deployment、HTTPRoute 状态就绪且 API Pod 经 Gateway 对公开应用 URL 收到非空 `2xx` 响应后才会标记为成功。
 
 ### 支持的构建方式
 

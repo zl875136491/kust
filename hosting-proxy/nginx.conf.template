@@ -1,0 +1,45 @@
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    '' close;
+}
+
+server {
+    listen 8080;
+    server_name _;
+
+    location = /_kust_proxy/healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    location / {
+        rewrite ^${KUST_APP_ROUTE_PATH}/?(.*)$ /$1 break;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Prefix ${KUST_APP_ROUTE_PATH};
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_buffering off;
+
+        # Rewriting needs an uncompressed upstream response. It covers standard
+        # absolute asset/API URLs without accepting user-provided proxy config.
+        proxy_set_header Accept-Encoding "";
+        sub_filter_once off;
+        sub_filter_types text/html text/css application/javascript application/x-javascript application/json;
+        sub_filter '"/' '"${KUST_APP_ROUTE_PATH}/';
+        sub_filter "'/" "'${KUST_APP_ROUTE_PATH}/";
+        sub_filter 'url(/' 'url(${KUST_APP_ROUTE_PATH}/';
+
+        # code-server emits Location: ./?folder=...; preserve the app prefix.
+        proxy_redirect ~^\./(.*)$ ${KUST_APP_ROUTE_PATH}/$1;
+        proxy_redirect ~^/(.*)$ ${KUST_APP_ROUTE_PATH}/$1;
+        proxy_cookie_path / ${KUST_APP_ROUTE_PATH}/;
+
+        proxy_pass ${KUST_APP_UPSTREAM_SCHEME}://127.0.0.1:${KUST_APP_UPSTREAM_PORT};
+    }
+}

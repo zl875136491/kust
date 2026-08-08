@@ -2,10 +2,10 @@
 set -Eeuo pipefail
 
 usage() {
-  echo "Usage: $0 <production|test> <backend-image-digest-ref> <frontend-image-digest-ref>" >&2
+  echo "Usage: $0 <production|test> <backend-image-digest-ref> <frontend-image-digest-ref> <proxy-image-digest-ref>" >&2
 }
 
-if [ "$#" -ne 3 ]; then
+if [ "$#" -ne 4 ]; then
   usage
   exit 2
 fi
@@ -13,6 +13,7 @@ fi
 environment="$1"
 backend_image="$2"
 frontend_image="$3"
+proxy_image="$4"
 
 : "${KUBE_API:?KUBE_API is required}"
 : "${KUBE_TOKEN:?KUBE_TOKEN is required}"
@@ -84,7 +85,7 @@ case "$environment" in
     ;;
 esac
 
-for image in "$backend_image" "$frontend_image"; do
+for image in "$backend_image" "$frontend_image" "$proxy_image"; do
   if ! printf '%s' "$image" | grep -Eq '^10\.17\.158\.118/kust/[a-z_]+@sha256:[0-9a-f]{64}$'; then
     echo "Deployment images must be immutable Harbor digest references" >&2
     exit 2
@@ -107,6 +108,7 @@ render() {
     -e "s|__USER_INFO_HOST_IP__|${USER_INFO_HOST_IP}|g" \
     -e "s|__BACKEND_IMAGE__|${backend_image}|g" \
     -e "s|__FRONTEND_IMAGE__|${frontend_image}|g" \
+    -e "s|__PROXY_IMAGE__|${proxy_image}|g" \
     "$source" > "$destination"
 }
 
