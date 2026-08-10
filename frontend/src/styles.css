@@ -772,21 +772,26 @@ input[type="checkbox"] { width: 15px; height: 15px; margin: 0; accent-color: var
 .hosting-build-progress__bar > i { display: block; height: 100%; background: var(--accent); border-radius: inherit; box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 44%, transparent); transition: width 360ms cubic-bezier(.16, 1, .3, 1); }
 .hosting-build-progress__bar.is-failed > i { background: var(--danger); box-shadow: 0 0 12px color-mix(in srgb, var(--danger) 44%, transparent); }
 .hosting-build-progress__stages { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; padding: 0; margin: 0; list-style: none; }
-.hosting-build-progress__stages li { display: grid; justify-items: center; gap: 5px; min-width: 0; color: var(--text-muted); text-align: center; }
+.hosting-build-progress__stages li { display: grid; justify-items: center; gap: 3px; min-width: 0; color: var(--text-muted); text-align: center; }
 .hosting-build-progress__stages li > span { display: grid; place-items: center; width: 22px; height: 22px; color: var(--text-muted); background: var(--surface-strong); border: 1px solid var(--border); border-radius: 50%; }
 .hosting-build-progress__stages strong { overflow: hidden; max-width: 100%; color: inherit; text-overflow: ellipsis; white-space: nowrap; font-size: 8px; font-weight: 600; }
+.hosting-build-progress__stages small { color: var(--text-muted); font-size: 7px; line-height: 1; white-space: nowrap; }
 .hosting-build-progress__stages .is-succeeded { color: var(--success); }
 .hosting-build-progress__stages .is-succeeded > span { color: var(--success); background: color-mix(in srgb, var(--success) 11%, var(--surface-strong)); border-color: color-mix(in srgb, var(--success) 34%, var(--border)); }
 .hosting-build-progress__stages .is-running { color: var(--accent); }
 .hosting-build-progress__stages .is-running > span { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 42%, var(--border)); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 9%, transparent); }
 .hosting-build-progress__stages .is-failed { color: var(--danger); }
 .hosting-build-progress__stages .is-failed > span { color: var(--danger); background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
+.hosting-build-progress__stages .is-skipped { color: var(--text-secondary); }
+.hosting-build-progress__stages .is-skipped > span { color: var(--text-secondary); background: color-mix(in srgb, var(--surface-soft) 78%, transparent); border-style: dashed; }
 .hosting-build-log { overflow: hidden; border: 1px solid var(--border); border-radius: 10px; }
 .hosting-build-log > header { display: flex; align-items: center; justify-content: space-between; min-height: 45px; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+.hosting-build-log > header > div { display: inline-flex; align-items: center; gap: 5px; }
 .hosting-build-log > header a { display: inline-flex; align-items: center; gap: 5px; color: var(--blue); font-size: 9px; }
 .hosting-build-log__events { display: grid; max-height: 230px; overflow: auto; }
 .hosting-build-log__events > div { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 46px; padding: 7px 11px; border-bottom: 1px solid var(--border); }
 .hosting-build-log__events > div:last-child { border-bottom: 0; }
+.hosting-build-log__refresh-error { display: flex !important; grid-column: 1 / -1; align-items: center; min-height: 38px !important; gap: 7px; padding: 8px 11px !important; color: var(--danger); background: color-mix(in srgb, var(--danger) 7%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--danger) 24%, var(--border)) !important; font-size: 9px; line-height: 1.45; }
 .hosting-build-log__events > div > span { display: grid; place-items: center; width: 22px; height: 22px; color: var(--text-muted); background: var(--surface-soft); border-radius: 6px; }
 .hosting-build-log__events > div.is-succeeded > span { color: var(--success); background: color-mix(in srgb, var(--success) 10%, var(--surface-soft)); }
 .hosting-build-log__events > div.is-running > span { color: var(--accent); background: var(--accent-soft); }
