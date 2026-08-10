@@ -1,6 +1,6 @@
 # Kust
 
-Kust 是一个面向平台团队与 Kubernetes 运维人员的多集群 Web 控制台。它采用无 Agent 架构，不向目标集群安装 CRD 或控制器；后端保存并使用 kubeconfig 访问 Kubernetes API，前端围绕资源浏览、YAML 变更和 Pod 现场操作提供桌面式工作区。
+Kust 是一个面向平台团队与 Kubernetes 运维人员的多集群 Web 控制台。它不向目标集群安装 CRD 或控制器；后端保存并使用 kubeconfig 访问 Kubernetes API，前端围绕资源浏览、YAML 变更和 Pod 现场操作提供桌面式工作区。应用托管流程内置受限部署 Agent，用于读取仓库证据和编排构建建议，但 Agent 不具备集群写权限。
 
 ![Kust Pod 资源管理与终端、文件、日志多窗口工作区](docs/images/main_show_case.png)
 
@@ -339,7 +339,19 @@ npm run dev
 
 ## 应用托管
 
-应用托管将 Git 仓库发布为 Kust 管理的 Kubernetes 应用。用户在“应用托管”中提供仓库、分支、构建方式、集群、命名空间和 HTTPRoute 路径；系统保存这些受限规格，并生成：
+### Agent 编排
+
+托管应用创建默认经过 Kust 的部署 Agent。用户只需提供仓库地址、分支、目标集群/命名空间和明确的运行环境变量；Agent 会在创建前读取受限的 `README.md`、`Dockerfile`、`Cargo.toml`、`package.json` 等项目证据，生成结构化部署计划。计划包含构建模式、端口、健康检查、入口、必需环境变量、持久化/WebSocket 特征、风险和证据。
+
+内置 Agent 是确定性的规则实现，未配置供应商时直接使用；管理员可在“系统设置 -> 托管 Agent”选择 OpenAI 兼容供应商、配置 HTTPS Endpoint/模型/API Key，并编辑或重新上传 `hosting-skill.md`。Skill 和供应商密钥只由后端保存，API Key 使用 Kust 加密密钥加密，浏览器不会读取已有密钥。源码证据支持 GitHub、GitLab.com 和允许列表中的自托管 GitLab，读取范围限制为常见清单、Dockerfile、README 和构建配置；发送给外部供应商前会过滤明显的密钥/密码行。
+
+Agent 只有建议权限，不能访问 Kubernetes、Jenkins 或集群凭证。后端会在实际创建时重新分析仓库并校验 Agent 输出，客户端传入的分析结果不具备信任级别；最终仍由 Kust 的仓库 SSRF 校验、镜像 digest 校验、命名空间/Gateway 策略和 Kubernetes 发布流程决定是否可部署。Skill 默认要求有状态项目进行人工确认；确认只代表用户已提供运行环境变量，不会授予 Agent 写入集群的权限。
+
+分析接口为 `POST /api/hosting/analyze`，Skill 管理接口为管理员专用的 `PUT /api/admin/agent/skill`。私有 GitHub 仓库可在分析请求中绑定已保存的 Git 凭证，凭证只在后端短时用于读取仓库文件。
+
+`celld` 等有状态项目会被标记为需要 S3/持久化，并提示 `CELLD_BUCKET`、AWS 凭证、`S3_ENDPOINT`、`CELLD_ADVERTISE` 等运行配置；这些值仍需由用户通过环境变量或后续 Secret 机制明确提供。
+
+应用托管将 Git 仓库发布为 Kust 管理的 Kubernetes 应用。用户在“应用托管”中提供仓库、分支、集群、命名空间、HTTPRoute 路径和运行环境变量；构建方式、端口、健康检查和入口由 Agent 根据证据推断，少见项目可在高级适配中补充构建命令或产物目录。系统保存这些受限规格，并生成：
 
 ```text
 Git repository -> Jenkins build -> Harbor digest
@@ -422,10 +434,12 @@ http://k8s.1oa.com.cn/apps/<team>/<application>
 | `POST` | `/api/auth/2fa/verify` | 验证 TOTP 并完成绑定/登录 |
 | `GET/PUT` | `/api/settings` | 个人设置 |
 | `GET/PUT` | `/api/admin/settings` | 平台设置 |
+| `PUT` | `/api/admin/agent/skill` | 管理员更新托管 Agent Skill |
 | `GET` | `/api/admin/users`、`/api/admin/roles` | 用户和角色 |
 | `GET` | `/api/admin/audit-logs` | 管理员审计日志 |
 | `PATCH` | `/api/admin/users/{id}/roles`、`/api/admin/users/{id}/status` | 角色与账号状态管理 |
 | `POST` | `/api/admin/users/{id}/reset-code` | 为本地账号生成重置码 |
+| `POST` | `/api/hosting/analyze` | 生成托管应用 Agent 部署计划 |
 | `GET/POST` | `/api/clusters` | 集群列表与添加 |
 | `PATCH/DELETE` | `/api/clusters/{id}` | 编辑或移除集群配置 |
 | `GET/PUT` | `/api/clusters/{id}/members` | 集群成员 ACL（管理员） |

@@ -7,7 +7,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use futures::TryStreamExt;
+use futures::{future::join_all, TryStreamExt};
 use mongodb::bson::{doc, oid::ObjectId, DateTime};
 use serde_json::json;
 use std::{collections::BTreeMap, net::IpAddr};
@@ -18,10 +18,10 @@ use crate::{
     error::AppError,
     kubernetes,
     models::{
-        ApplicationBuildCallbackRequest, ApplicationBuildDocument, ApplicationBuildResponse,
-        ApplicationWebhookResponse, CreateGitCredentialRequest, CreateHostedApplicationRequest,
-        GitCredentialDocument, GitCredentialResponse, HostedApplicationDocument,
-        HostedApplicationResponse, UpdateHostedApplicationRequest,
+        AgentAnalysisResponse, ApplicationBuildCallbackRequest, ApplicationBuildDocument,
+        ApplicationBuildResponse, ApplicationWebhookResponse, CreateGitCredentialRequest,
+        CreateHostedApplicationRequest, GitCredentialDocument, GitCredentialResponse,
+        HostedApplicationDocument, HostedApplicationResponse, UpdateHostedApplicationRequest,
     },
     routes::write_audit,
     state::SharedState,
@@ -58,6 +58,10 @@ pub fn router_routes(router: axum::Router<SharedState>) -> axum::Router<SharedSt
         .route(
             "/api/hosting/applications",
             axum::routing::get(list_applications).post(create_application),
+        )
+        .route(
+            "/api/hosting/analyze",
+            axum::routing::post(analyze_application),
         )
         .route(
             "/api/hosting/applications/{application_id}",
@@ -99,10 +103,594 @@ pub fn router_routes(router: axum::Router<SharedState>) -> axum::Router<SharedSt
         )
 }
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AnalyzeApplicationRequest {
+    repository_url: String,
+    #[serde(default = "default_git_ref")]
+    git_ref: String,
+    credential_id: Option<String>,
+    source_subdirectory: Option<String>,
+}
+
+fn default_git_ref() -> String {
+    "main".into()
+}
+
+/// The built-in planner is deliberately deterministic. It reads repository
+/// metadata through a bounded fetch and returns recommendations; policy
+/// validation remains in Kust and provider credentials never enter the plan.
+async fn analyze_application(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Json(request): Json<AnalyzeApplicationRequest>,
+) -> Result<Json<AgentAnalysisResponse>, AppError> {
+    let actor = auth::authenticate(&state, &headers, "authenticated").await?;
+    let repository_url = validate_repository(&request.repository_url)?;
+    let host = Url::parse(&repository_url)
+        .ok()
+        .and_then(|value| value.host_str().map(str::to_string))
+        .ok_or_else(|| AppError::bad_request("repository host is invalid"))?;
+    validate_repository_host(&host, &state.config.app_allowed_git_hosts)?;
+    validate_source_subdirectory(request.source_subdirectory.as_deref())?;
+    let credential_secret = if let Some(raw_id) = request.credential_id.as_deref() {
+        let credential_id = parse_id(raw_id, "credential id")?;
+        let credential = state
+            .git_credentials
+            .find_one(doc! { "_id": credential_id })
+            .await?
+            .ok_or_else(|| AppError::not_found("credential was not found"))?;
+        if !actor.user.is_admin() && credential.owner_user_id != actor.user.id {
+            return Err(AppError::forbidden("credential access is not allowed"));
+        }
+        Some(state.secrets.decrypt(&credential.secret_encrypted)?)
+    } else {
+        None
+    };
+    let analysis = analyze_repository(
+        &state,
+        &repository_url,
+        &request.git_ref,
+        request.source_subdirectory.as_deref(),
+        credential_secret.as_deref(),
+    )
+    .await?;
+    write_audit(
+        &state,
+        Some(actor.user.id),
+        "hosting.application.analyze",
+        Some(&repository_url),
+        None,
+        json!({"provider": analysis.provider, "framework": analysis.framework}),
+    )
+    .await?;
+    Ok(Json(analysis))
+}
+
+async fn fetch_public_repository_file(
+    state: &SharedState,
+    repository_url: &str,
+    git_ref: &str,
+    source_subdirectory: Option<&str>,
+    path: &str,
+    credential_secret: Option<&str>,
+) -> Option<String> {
+    let parsed = Url::parse(repository_url).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return None;
+    }
+    let host = parsed
+        .host_str()?
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    let raw = repository_raw_url(&parsed, &host, git_ref, source_subdirectory, path)?;
+    let mut fetch = state
+        .http
+        .get(raw)
+        .timeout(std::time::Duration::from_secs(5));
+    if let Some(secret) = credential_secret.filter(|value| !value.is_empty()) {
+        if host == "github.com" {
+            fetch = fetch.bearer_auth(secret);
+        } else {
+            fetch = fetch.header("PRIVATE-TOKEN", secret).bearer_auth(secret);
+        }
+    }
+    let response = fetch.send().await.ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let text = response.text().await.ok()?;
+    Some(text.chars().take(24_000).collect())
+}
+
+fn repository_raw_url(
+    parsed: &Url,
+    host: &str,
+    git_ref: &str,
+    source_subdirectory: Option<&str>,
+    path: &str,
+) -> Option<String> {
+    let segments = parsed
+        .path_segments()?
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if segments.len() < 2 {
+        return None;
+    }
+    let project_segments = segments.iter().map(String::as_str).collect::<Vec<_>>();
+    let repo = project_segments.last()?.trim_end_matches(".git");
+    let owner = project_segments.first()?.trim();
+    if owner.is_empty() || repo.is_empty() {
+        return None;
+    }
+    let raw_ref = git_ref
+        .trim()
+        .strip_prefix("refs/heads/")
+        .or_else(|| git_ref.trim().strip_prefix("refs/tags/"))
+        .unwrap_or(git_ref.trim());
+    let encoded_ref = raw_ref
+        .split('/')
+        .map(|segment| url::form_urlencoded::byte_serialize(segment.as_bytes()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("/");
+    let path = source_subdirectory
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|directory| format!("{directory}/{path}"))
+        .unwrap_or_else(|| path.to_string());
+    let raw = if host == "github.com" {
+        if segments.len() != 2 {
+            return None;
+        }
+        format!("https://raw.githubusercontent.com/{owner}/{repo}/{encoded_ref}/{path}")
+    } else {
+        // GitLab and self-managed GitLab expose a stable raw endpoint. The
+        // project path is preserved so nested groups work as expected.
+        let mut project_segments = segments;
+        if let Some(last) = project_segments.last_mut() {
+            *last = last.trim_end_matches(".git").to_string();
+        }
+        let project_path = project_segments.join("/");
+        let origin = format!("{}://{}", parsed.scheme(), parsed.authority());
+        format!("{origin}/{project_path}/-/raw/{encoded_ref}/{path}")
+    };
+    Some(raw)
+}
+
+async fn analyze_repository(
+    state: &SharedState,
+    repository_url: &str,
+    git_ref: &str,
+    source_subdirectory: Option<&str>,
+    credential_secret: Option<&str>,
+) -> Result<AgentAnalysisResponse, AppError> {
+    validate_git_ref(git_ref)?;
+    validate_source_subdirectory(source_subdirectory)?;
+    let evidence_paths = [
+        "Dockerfile",
+        "README.md",
+        "Cargo.toml",
+        "package.json",
+        "deno.json",
+        "deno.jsonc",
+        "go.mod",
+        "pyproject.toml",
+        "requirements.txt",
+        "pnpm-lock.yaml",
+        "yarn.lock",
+        "package-lock.json",
+        "Procfile",
+        "docker-compose.yml",
+    ];
+    let fetched = join_all(evidence_paths.iter().map(|path| async move {
+        (
+            *path,
+            fetch_public_repository_file(
+                state,
+                repository_url,
+                git_ref,
+                source_subdirectory,
+                path,
+                credential_secret,
+            )
+            .await,
+        )
+    }))
+    .await;
+    let evidence = fetched
+        .iter()
+        .filter_map(|(path, content)| content.as_ref().map(|_| (*path).to_string()))
+        .collect::<Vec<_>>();
+    let combined = fetched
+        .iter()
+        .filter_map(|(path, content)| {
+            content
+                .as_ref()
+                .map(|value| format!("--- {path} ---\n{value}"))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let dockerfile = fetched
+        .iter()
+        .find(|(path, _)| *path == "Dockerfile")
+        .and_then(|(_, value)| value.clone());
+    let cargo = fetched
+        .iter()
+        .find(|(path, _)| *path == "Cargo.toml")
+        .and_then(|(_, value)| value.clone());
+    let package = fetched
+        .iter()
+        .find(|(path, _)| *path == "package.json")
+        .and_then(|(_, value)| value.clone());
+    let deno = fetched
+        .iter()
+        .find(|(path, _)| matches!(*path, "deno.json" | "deno.jsonc"))
+        .and_then(|(_, value)| value.clone());
+    let go_mod = fetched
+        .iter()
+        .find(|(path, _)| *path == "go.mod")
+        .and_then(|(_, value)| value.clone());
+    let python = fetched
+        .iter()
+        .find(|(path, _)| matches!(*path, "pyproject.toml" | "requirements.txt"))
+        .and_then(|(_, value)| value.clone());
+    let port = regex_port(&combined).unwrap_or(8080);
+    let is_celld = combined.to_ascii_lowercase().contains("celld_bucket")
+        || repository_url.contains("denoland/celld");
+    let mut required_environment = Vec::new();
+    let mut optional_environment = extract_environment_names(&combined);
+    let mut warnings = Vec::new();
+    if is_celld {
+        required_environment.extend(
+            ["CELLD_BUCKET", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
+                .into_iter()
+                .map(str::to_string),
+        );
+        optional_environment.extend(
+            ["S3_ENDPOINT", "AWS_REGION", "CELLD_ADVERTISE", "CELLD_ADDR"]
+                .into_iter()
+                .map(str::to_string),
+        );
+        warnings
+            .push("这是有状态的 Durable Objects 服务，需要 S3 兼容存储和持久化运行配置。".into());
+        warnings
+            .push("单副本适合验证，不代表生产高可用；多节点需要可互通的 CELLD_ADVERTISE。".into());
+    }
+    if dockerfile.is_none() && cargo.is_none() && package.is_none() {
+        warnings.push("未读取到常见项目清单，建议在构建前确认仓库入口。".into());
+    }
+    let framework = if is_celld {
+        "rust-daemon"
+    } else if cargo.is_some() {
+        "rust-service"
+    } else if package.is_some() {
+        "node-service"
+    } else if deno.is_some() {
+        "deno-service"
+    } else if go_mod.is_some() {
+        "go-service"
+    } else if python.is_some() {
+        "python-service"
+    } else {
+        "container-service"
+    };
+    let entrypoint = dockerfile.as_deref().and_then(|text| {
+        text.lines().find_map(|line| {
+            line.trim()
+                .strip_prefix("ENTRYPOINT")
+                .or_else(|| line.trim().strip_prefix("CMD"))
+                .map(str::trim)
+                .map(str::to_string)
+        })
+    });
+    let settings = state.platform_config.read().await.clone();
+    let requires_review = is_clearly_stateful(is_celld, &combined)
+        && skill_requires_review(&settings.agent_skill_markdown);
+    let baseline = AgentAnalysisResponse {
+        provider: "builtin".into(),
+        confidence: if is_celld {
+            0.96
+        } else if !evidence.is_empty() {
+            0.76
+        } else {
+            0.42
+        },
+        framework: framework.into(),
+        build_mode: if dockerfile.is_some() {
+            "dockerfile"
+        } else if package.is_some() || deno.is_some() || go_mod.is_some() || python.is_some() {
+            "buildpack"
+        } else {
+            "dockerfile"
+        }
+        .into(),
+        container_port: port,
+        health_path: "/".into(),
+        entrypoint,
+        required_environment,
+        optional_environment,
+        stateful: is_celld,
+        needs_persistent_storage: is_celld,
+        websocket: combined.to_ascii_lowercase().contains("websocket"),
+        warnings,
+        evidence,
+        requires_review,
+        analyzed_at: DateTime::now().try_to_rfc3339_string().unwrap_or_default(),
+    };
+    validate_agent_analysis(&baseline)?;
+    validate_agent_policy(&baseline, &settings.agent_skill_markdown)?;
+    if settings.agent_provider == "builtin" {
+        return Ok(baseline);
+    }
+    let endpoint = settings
+        .agent_endpoint
+        .as_deref()
+        .ok_or_else(|| AppError::conflict("agent endpoint is not configured"))?;
+    let api_key = settings
+        .agent_api_key_encrypted
+        .as_deref()
+        .ok_or_else(|| AppError::conflict("agent API key is not configured"))?;
+    let api_key = state.secrets.decrypt(api_key)?;
+    let url = format!("{}/chat/completions", endpoint.trim_end_matches('/'));
+    let prompt = format!(
+        "Return JSON matching this contract exactly. Do not include markdown fences.\n{}\n\n{}\n\nRepository evidence (redacted):\n{}",
+        agent_response_contract(),
+        settings.agent_skill_markdown,
+        redact_repository_evidence(&combined)
+            .chars()
+            .take(45_000)
+            .collect::<String>()
+    );
+    let response = state.http.post(url).bearer_auth(api_key).json(&json!({
+        "model": settings.agent_model.unwrap_or_else(|| "default".into()),
+        "temperature": 0,
+        "messages": [{"role": "system", "content": "You are Kust's deployment planning agent. Return only the requested JSON."}, {"role": "user", "content": prompt}],
+        "response_format": {"type": "json_object"}
+    })).timeout(std::time::Duration::from_secs(30)).send().await.map_err(|error| AppError::upstream(format!("agent provider request failed: {error}")))?;
+    if !response.status().is_success() {
+        return Err(AppError::upstream(format!(
+            "agent provider returned {}",
+            response.status()
+        )));
+    }
+    let body: serde_json::Value = response.json().await.map_err(|error| {
+        AppError::upstream(format!("agent provider response is invalid: {error}"))
+    })?;
+    let content = body
+        .get("choices")
+        .and_then(|value| value.get(0))
+        .and_then(|value| value.get("message"))
+        .and_then(|value| value.get("content"))
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| AppError::upstream("agent provider response has no message content"))?;
+    let content = content
+        .trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+    let mut candidate: AgentAnalysisResponse = serde_json::from_str(content).map_err(|error| {
+        AppError::upstream(format!(
+            "agent provider returned an unsupported plan: {error}"
+        ))
+    })?;
+    candidate = merge_external_analysis(baseline, candidate, &settings.agent_provider);
+    validate_agent_analysis(&candidate)?;
+    validate_agent_policy(&candidate, &settings.agent_skill_markdown)?;
+    Ok(candidate)
+}
+
+fn agent_response_contract() -> &'static str {
+    r#"JSON object: {"confidence": number 0..1, "framework": string, "buildMode": "dockerfile"|"buildpack"|"static"|"custom", "containerPort": integer, "healthPath": string starting with /, "entrypoint": string|null, "requiredEnvironment": string[], "optionalEnvironment": string[], "stateful": boolean, "needsPersistentStorage": boolean, "websocket": boolean, "warnings": string[], "evidence": string[], "requiresReview": boolean, "analyzedAt": RFC3339 string}. Do not include provider; Kust sets it."#
+}
+
+fn merge_external_analysis(
+    baseline: AgentAnalysisResponse,
+    mut candidate: AgentAnalysisResponse,
+    provider: &str,
+) -> AgentAnalysisResponse {
+    candidate.provider = provider.into();
+    candidate.stateful |= baseline.stateful;
+    candidate.needs_persistent_storage |= baseline.needs_persistent_storage;
+    candidate.websocket |= baseline.websocket;
+    candidate.requires_review |=
+        baseline.requires_review || (candidate.stateful || candidate.needs_persistent_storage);
+    candidate.required_environment = merge_analysis_values(
+        baseline.required_environment,
+        candidate.required_environment,
+        128,
+    );
+    candidate.optional_environment = merge_analysis_values(
+        baseline.optional_environment,
+        candidate.optional_environment,
+        128,
+    );
+    candidate.warnings = merge_analysis_values(baseline.warnings, candidate.warnings, 32);
+    candidate.evidence = merge_analysis_values(baseline.evidence, candidate.evidence, 64);
+    candidate
+}
+
+fn merge_analysis_values(
+    primary: Vec<String>,
+    secondary: Vec<String>,
+    limit: usize,
+) -> Vec<String> {
+    let mut values = std::collections::BTreeSet::new();
+    values.extend(primary.into_iter().filter(|value| !value.trim().is_empty()));
+    values.extend(
+        secondary
+            .into_iter()
+            .filter(|value| !value.trim().is_empty()),
+    );
+    values.into_iter().take(limit).collect()
+}
+
+fn extract_environment_names(text: &str) -> Vec<String> {
+    let ignored = [
+        "HTTP", "HTTPS", "PATH", "HOME", "USER", "ENV", "ARG", "FROM", "CMD", "PORT",
+    ];
+    let mut names = std::collections::BTreeSet::new();
+    for token in
+        text.split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+    {
+        if token.len() < 4
+            || !token.contains('_')
+            || ignored.contains(&token)
+            || !token
+                .bytes()
+                .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_')
+        {
+            continue;
+        }
+        names.insert(token.to_string());
+        if names.len() >= 64 {
+            break;
+        }
+    }
+    names.into_iter().collect()
+}
+
+fn redact_repository_evidence(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            let lower = line.to_ascii_lowercase();
+            if lower.contains("password")
+                || lower.contains("secret")
+                || lower.contains("api_key")
+                || lower.contains("access_key")
+                || lower.contains("private_key")
+                || lower.contains("token=")
+            {
+                "[redacted potentially sensitive repository line]".to_string()
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn is_clearly_stateful(celld: bool, evidence: &str) -> bool {
+    celld
+        || evidence.to_ascii_lowercase().contains("persistentvolume")
+        || evidence.to_ascii_lowercase().contains("statefulset")
+        || evidence.to_ascii_lowercase().contains("s3_endpoint")
+        || evidence.to_ascii_lowercase().contains("database_url")
+}
+
+fn skill_requires_review(skill: &str) -> bool {
+    let normalized = skill.to_ascii_lowercase();
+    normalized.contains("review=required")
+        || normalized.contains("review: required")
+        || normalized.contains("must_review_stateful")
+}
+
+#[derive(Default)]
+struct AgentPolicy {
+    allowed_build_modes: Option<std::collections::BTreeSet<String>>,
+    max_container_port: Option<i32>,
+    forbid_stateful: bool,
+}
+
+fn parse_agent_policy(skill: &str) -> AgentPolicy {
+    let mut policy = AgentPolicy::default();
+    for line in skill.lines().map(str::trim) {
+        if let Some(value) = line.strip_prefix("allow_build_modes:") {
+            let values = value
+                .split(',')
+                .map(str::trim)
+                .filter(|value| matches!(*value, "dockerfile" | "buildpack" | "static" | "custom"))
+                .map(str::to_string)
+                .collect::<std::collections::BTreeSet<_>>();
+            if !values.is_empty() {
+                policy.allowed_build_modes = Some(values);
+            }
+        } else if let Some(value) = line.strip_prefix("max_container_port:") {
+            policy.max_container_port = value
+                .trim()
+                .parse::<i32>()
+                .ok()
+                .filter(|port| (1..=65535).contains(port));
+        } else if line.eq_ignore_ascii_case("forbid_stateful: true") {
+            policy.forbid_stateful = true;
+        }
+    }
+    policy
+}
+
+fn validate_agent_policy(analysis: &AgentAnalysisResponse, skill: &str) -> Result<(), AppError> {
+    let policy = parse_agent_policy(skill);
+    if policy
+        .allowed_build_modes
+        .as_ref()
+        .is_some_and(|modes| !modes.contains(&analysis.build_mode))
+    {
+        return Err(AppError::conflict(
+            "agent plan violates the configured build mode policy",
+        ));
+    }
+    if policy
+        .max_container_port
+        .is_some_and(|max_port| analysis.container_port > max_port)
+    {
+        return Err(AppError::conflict(
+            "agent plan exceeds the configured container port policy",
+        ));
+    }
+    if policy.forbid_stateful && (analysis.stateful || analysis.needs_persistent_storage) {
+        return Err(AppError::conflict(
+            "agent plan contains a stateful workload forbidden by Skill",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_agent_analysis(analysis: &AgentAnalysisResponse) -> Result<(), AppError> {
+    if !matches!(
+        analysis.build_mode.as_str(),
+        "dockerfile" | "buildpack" | "static" | "custom"
+    ) {
+        return Err(AppError::bad_request(
+            "agent returned an unsupported build mode",
+        ));
+    }
+    if !(1..=65535).contains(&analysis.container_port) || analysis.container_port == 18080 {
+        return Err(AppError::bad_request(
+            "agent returned an invalid container port",
+        ));
+    }
+    validate_health_path(&analysis.health_path)?;
+    if !(0.0..=1.0).contains(&analysis.confidence)
+        || analysis.warnings.len() > 32
+        || analysis.evidence.len() > 64
+        || analysis.required_environment.len() > 128
+        || analysis.optional_environment.len() > 128
+    {
+        return Err(AppError::bad_request(
+            "agent returned invalid confidence or metadata",
+        ));
+    }
+    Ok(())
+}
+
+fn regex_port(text: &str) -> Option<i32> {
+    let marker = text.find("EXPOSE")?;
+    text[marker + 6..]
+        .split_whitespace()
+        .next()?
+        .split('/')
+        .next()?
+        .parse()
+        .ok()
+}
+
 async fn capabilities(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    let settings = state.platform_config.read().await;
     Json(json!({
         "hostingEnabled": state.config.app_hosting_enabled,
         "jenkinsConfigured": state.config.jenkins_url.is_some() && state.config.jenkins_api_token.is_some(),
+        "agentEnabled": settings.agent_enabled,
+        "agentProvider": settings.agent_provider.clone(),
         "allowedNamespaces": state.config.app_allowed_namespaces,
         "defaultNamespace": state.config.app_allowed_namespaces.first().cloned().unwrap_or_else(|| "default".into()),
     }))
@@ -369,6 +957,7 @@ fn validate_source_subdirectory(value: Option<&str>) -> Result<(), AppError> {
     };
     if value.starts_with('/')
         || value.contains("..")
+        || value.chars().any(char::is_whitespace)
         || value.chars().any(|character| character.is_control())
         || value.len() > 240
     {
@@ -848,6 +1437,7 @@ fn app_response(
         created_at: app.created_at.try_to_rfc3339_string().unwrap_or_default(),
         updated_at: app.updated_at.try_to_rfc3339_string().unwrap_or_default(),
         latest_build: latest_build.map(Into::into),
+        agent_analysis: app.agent_analysis,
     }
 }
 
@@ -883,13 +1473,62 @@ async fn list_applications(
 async fn create_application(
     State(state): State<SharedState>,
     headers: HeaderMap,
-    Json(request): Json<CreateHostedApplicationRequest>,
+    Json(mut request): Json<CreateHostedApplicationRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     if !state.config.app_hosting_enabled {
         return Err(AppError::conflict("application hosting is disabled"));
     }
     let actor = auth::authenticate(&state, &headers, "authenticated").await?;
     require_hosting_write(&actor)?;
+    if !state.platform_config.read().await.agent_enabled {
+        return Err(AppError::conflict(
+            "application hosting requires the deployment agent to be enabled",
+        ));
+    }
+    // Validate the source before attempting evidence retrieval or decrypting a
+    // credential. Direct API callers must not be able to turn analysis into an
+    // SSRF or credential-forwarding path.
+    let repository_url = validate_repository(&request.repository_url)?;
+    let repository_host = Url::parse(&repository_url)
+        .ok()
+        .and_then(|value| value.host_str().map(str::to_string))
+        .ok_or_else(|| AppError::bad_request("repository host is invalid"))?;
+    validate_repository_host(&repository_host, &state.config.app_allowed_git_hosts)?;
+    validate_source_subdirectory(request.source_subdirectory.as_deref())?;
+    request.repository_url = repository_url;
+    // The client analysis is presentation data only. Always plan again on the
+    // server so direct API callers cannot bypass the hosting-agent gate.
+    let analysis_secret = if let Some(raw_id) = request.credential_id.as_deref() {
+        let credential_id = parse_id(raw_id, "credential id")?;
+        let credential = state
+            .git_credentials
+            .find_one(doc! { "_id": credential_id })
+            .await?
+            .ok_or_else(|| AppError::not_found("credential was not found"))?;
+        if !actor.user.is_admin() && credential.owner_user_id != actor.user.id {
+            return Err(AppError::forbidden("credential access is not allowed"));
+        }
+        Some(state.secrets.decrypt(&credential.secret_encrypted)?)
+    } else {
+        None
+    };
+    let analysis = analyze_repository(
+        &state,
+        &request.repository_url,
+        &request.git_ref,
+        request.source_subdirectory.as_deref(),
+        analysis_secret.as_deref(),
+    )
+    .await?;
+    request.build_mode = analysis.build_mode.clone();
+    request.container_port = analysis.container_port;
+    request.health_path = analysis.health_path.clone();
+    request.agent_analysis = Some(analysis.clone());
+    if analysis.requires_review && !request.agent_review_acknowledged {
+        return Err(AppError::conflict(
+            "agent requires a review acknowledgement before creating this stateful application",
+        ));
+    }
     let (slug, repository_url, host, gateway) = validate_app_request(&state, &request)?;
     let cluster_id = parse_id(&request.cluster_id, "cluster id")?;
     let cluster = state
@@ -972,6 +1611,7 @@ async fn create_application(
         webhook_secret_encrypted: None,
         created_at: now,
         updated_at: now,
+        agent_analysis: Some(analysis),
     };
     if state
         .hosted_applications
@@ -1060,6 +1700,11 @@ async fn update_application(
     if !actor.user.is_admin() && app.owner_user_id != actor.user.id {
         return Err(AppError::forbidden(
             "only the application owner can update it",
+        ));
+    }
+    if !state.platform_config.read().await.agent_enabled {
+        return Err(AppError::conflict(
+            "application hosting requires the deployment agent to be enabled",
         ));
     }
     if let Some(v) = request.git_ref {
@@ -1482,6 +2127,16 @@ async fn trigger_build(
 ) -> Result<impl IntoResponse, AppError> {
     if !state.config.app_hosting_enabled {
         return Err(AppError::conflict("application hosting is disabled"));
+    }
+    if !state.platform_config.read().await.agent_enabled {
+        return Err(AppError::conflict(
+            "application hosting requires the deployment agent to be enabled",
+        ));
+    }
+    if app.agent_analysis.is_none() {
+        return Err(AppError::conflict(
+            "application must be re-saved through the deployment agent before building",
+        ));
     }
     // Reclaim abandoned asynchronous work before enforcing the single active build
     // invariant. Pipeline compilation failures never claim a source lease, a
@@ -2105,6 +2760,112 @@ mod tests {
             "http://traefik.traefik-system.svc.cluster.local/apps/demo/"
         );
         assert!(super::public_route_url("not a URL", "/apps/demo").is_err());
+    }
+
+    #[test]
+    fn analyzer_detects_celld_runtime_requirements() {
+        let text =
+            "FROM debian\nEXPOSE 8080\nENTRYPOINT [\"/usr/local/bin/celld\"]\nCELLD_BUCKET\n";
+        assert_eq!(super::regex_port(text), Some(8080));
+        assert!(text.to_ascii_lowercase().contains("celld_bucket"));
+    }
+
+    #[test]
+    fn skill_requires_review_marker_is_strict_and_case_insensitive() {
+        assert!(super::skill_requires_review("review: required"));
+        assert!(super::skill_requires_review("MUST_REVIEW_STATEFUL"));
+        assert!(!super::skill_requires_review("review: optional"));
+    }
+
+    #[test]
+    fn builds_github_and_nested_gitlab_raw_urls() {
+        let github = url::Url::parse("https://github.com/denoland/celld.git").unwrap();
+        assert_eq!(
+            super::repository_raw_url(&github, "github.com", "refs/heads/main", None, "Dockerfile")
+                .as_deref(),
+            Some("https://raw.githubusercontent.com/denoland/celld/main/Dockerfile")
+        );
+        let gitlab = url::Url::parse("https://gitlab.example.com/platform/team/app.git").unwrap();
+        assert_eq!(
+            super::repository_raw_url(
+                &gitlab,
+                "gitlab.example.com",
+                "main",
+                Some("services/api"),
+                "README.md"
+            )
+            .as_deref(),
+            Some("https://gitlab.example.com/platform/team/app/-/raw/main/services/api/README.md")
+        );
+    }
+
+    #[test]
+    fn redacts_sensitive_repository_lines_before_external_agent() {
+        let redacted = super::redact_repository_evidence(
+            "PORT=8080\nAWS_SECRET_ACCESS_KEY=abc\nDATABASE_URL=postgres://...",
+        );
+        assert!(!redacted.contains("abc"));
+        assert!(redacted.contains("PORT=8080"));
+    }
+
+    #[test]
+    fn skill_policy_rejects_disallowed_plans() {
+        let plan = super::AgentAnalysisResponse {
+            provider: "builtin".into(),
+            confidence: 0.8,
+            framework: "service".into(),
+            build_mode: "dockerfile".into(),
+            container_port: 8080,
+            health_path: "/".into(),
+            entrypoint: None,
+            required_environment: vec![],
+            optional_environment: vec![],
+            stateful: false,
+            needs_persistent_storage: false,
+            websocket: false,
+            warnings: vec![],
+            evidence: vec![],
+            requires_review: false,
+            analyzed_at: String::new(),
+        };
+        assert!(super::validate_agent_policy(&plan, "allow_build_modes: buildpack").is_err());
+        assert!(super::validate_agent_policy(&plan, "max_container_port: 3000").is_err());
+    }
+
+    #[test]
+    fn extracts_only_uppercase_environment_names() {
+        let values =
+            super::extract_environment_names("AWS_ACCESS_KEY_ID CELLD_BUCKET lower_case PORT");
+        assert!(values.contains(&"AWS_ACCESS_KEY_ID".to_string()));
+        assert!(values.contains(&"CELLD_BUCKET".to_string()));
+        assert!(!values.contains(&"PORT".to_string()));
+        assert!(!values.contains(&"lower_case".to_string()));
+    }
+
+    #[test]
+    fn rejects_untrusted_agent_plan_values() {
+        let mut plan = super::AgentAnalysisResponse {
+            provider: "builtin".into(),
+            confidence: 1.0,
+            framework: "container".into(),
+            build_mode: "dockerfile".into(),
+            container_port: 18080,
+            health_path: "/".into(),
+            entrypoint: None,
+            required_environment: vec![],
+            optional_environment: vec![],
+            stateful: false,
+            needs_persistent_storage: false,
+            websocket: false,
+            warnings: vec![],
+            evidence: vec![],
+            requires_review: false,
+            analyzed_at: String::new(),
+        };
+        assert!(super::validate_agent_analysis(&plan).is_err());
+        plan.container_port = 8080;
+        plan.health_path = "/../private".into();
+        assert!(super::validate_agent_analysis(&plan).is_err());
     }
 
     #[test]

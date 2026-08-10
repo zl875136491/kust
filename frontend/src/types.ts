@@ -180,6 +180,12 @@ export interface PlatformSettings {
   oaUserSourceConfigured: boolean;
   presetClustersReadOnly: boolean;
   updatedAt: string;
+  agentEnabled: boolean;
+  agentProvider: string;
+  agentEndpoint?: string;
+  agentModel?: string;
+  agentSkillMarkdown: string;
+  agentSkillUpdatedAt?: string;
 }
 
 export type PlatformSettingsUpdate = Pick<
@@ -190,7 +196,14 @@ export type PlatformSettingsUpdate = Pick<
   | 'cacheTtlSeconds'
   | 'cacheSyncSeconds'
   | 'sessionTimeoutHours'
->;
+  | 'agentEnabled'
+  | 'agentProvider'
+  | 'agentEndpoint'
+  | 'agentModel'
+> & {
+  agentApiKey?: string;
+  agentSkillMarkdown?: string;
+};
 
 export interface RegistrationProfile {
   username: string;
@@ -241,6 +254,25 @@ export interface SearchResult {
 }
 
 export type HostingBuildMode = 'dockerfile' | 'buildpack' | 'static' | 'custom';
+
+export interface AgentAnalysis {
+  provider: string;
+  confidence: number;
+  framework: string;
+  buildMode: HostingBuildMode;
+  containerPort: number;
+  healthPath: string;
+  entrypoint?: string;
+  requiredEnvironment: string[];
+  optionalEnvironment: string[];
+  stateful: boolean;
+  needsPersistentStorage: boolean;
+  websocket: boolean;
+  warnings: string[];
+  evidence: string[];
+  requiresReview: boolean;
+  analyzedAt: string;
+}
 
 export interface GitCredential {
   id: string;
@@ -301,6 +333,7 @@ export interface HostedApplication {
   createdAt: string;
   updatedAt: string;
   latestBuild?: ApplicationBuild;
+  agentAnalysis?: AgentAnalysis;
 }
 
 export interface CreateGitCredentialPayload {
@@ -338,6 +371,8 @@ export interface CreateHostedApplicationPayload {
   gatewayName?: string;
   gatewayNamespace?: string;
   autoDeploy: boolean;
+  agentReviewAcknowledged?: boolean;
+  agentAnalysis?: AgentAnalysis;
 }
 
 export interface UpdateHostedApplicationPayload {
@@ -370,6 +405,8 @@ export interface ApplicationWebhook {
 export interface HostingCapabilities {
   hostingEnabled: boolean;
   jenkinsConfigured: boolean;
+  agentEnabled: boolean;
+  agentProvider: string;
   allowedNamespaces: string[];
   defaultNamespace: string;
 }

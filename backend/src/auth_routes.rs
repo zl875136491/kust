@@ -21,6 +21,12 @@ use crate::{
     state::SharedState,
 };
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSkillUpdateRequest {
+    pub markdown: String,
+}
+
 pub async fn auth_capabilities(State(state): State<SharedState>) -> Json<AuthCapabilitiesResponse> {
     let settings = state.platform_config.read().await;
     Json(AuthCapabilitiesResponse {
@@ -485,6 +491,32 @@ pub async fn admin_platform_settings(
     ))
 }
 
+pub async fn update_agent_skill(
+    State(state): State<SharedState>,
+    headers: HeaderMap,
+    Json(request): Json<AgentSkillUpdateRequest>,
+) -> Result<Json<PlatformSettingsResponse>, AppError> {
+    let actor = auth::require_admin(&state, &headers).await?;
+    if request.markdown.len() > 100_000 || !request.markdown.contains("Kust Hosting Agent Skill") {
+        return Err(AppError::bad_request(
+            "agent skill must be a valid Kust hosting skill markdown",
+        ));
+    }
+    let mut settings = state.platform_config.read().await.clone();
+    settings.agent_skill_markdown = request.markdown;
+    settings.agent_skill_updated_at = Some(DateTime::now());
+    settings.updated_at = DateTime::now();
+    settings.updated_by = Some(actor.user.id);
+    state
+        .platform_settings
+        .replace_one(doc! { "_id": &settings.id }, &settings)
+        .await?;
+    *state.platform_config.write().await = settings.clone();
+    Ok(Json(
+        settings.response(state.config.oa_user_info_url.is_some()),
+    ))
+}
+
 pub async fn update_platform_settings(
     State(state): State<SharedState>,
     headers: HeaderMap,
@@ -508,6 +540,35 @@ pub async fn update_platform_settings(
     settings.cache_ttl_seconds = request.cache_ttl_seconds;
     settings.cache_sync_seconds = request.cache_sync_seconds;
     settings.session_timeout_hours = request.session_timeout_hours;
+    settings.agent_enabled = request.agent_enabled;
+    settings.agent_provider = request.agent_provider.trim().to_string();
+    settings.agent_endpoint = request
+        .agent_endpoint
+        .and_then(|value| (!value.trim().is_empty()).then_some(value.trim().to_string()));
+    settings.agent_model = request
+        .agent_model
+        .and_then(|value| (!value.trim().is_empty()).then_some(value.trim().to_string()));
+    if let Some(key) = request
+        .agent_api_key
+        .filter(|value| !value.trim().is_empty())
+    {
+        if key.len() > 512 {
+            return Err(AppError::bad_request("agent API key is too long"));
+        }
+        settings.agent_api_key_encrypted = Some(state.secrets.encrypt(&key)?);
+    }
+    if let Some(skill) = request
+        .agent_skill_markdown
+        .filter(|value| !value.trim().is_empty())
+    {
+        if skill.len() > 100_000 || !skill.contains("Kust Hosting Agent Skill") {
+            return Err(AppError::bad_request(
+                "agent skill must be a valid Kust hosting skill markdown",
+            ));
+        }
+        settings.agent_skill_markdown = skill;
+        settings.agent_skill_updated_at = Some(DateTime::now());
+    }
     settings.updated_at = DateTime::now();
     settings.updated_by = Some(actor.user.id);
     state
@@ -681,6 +742,22 @@ fn validate_platform_settings(
     request: &UpdatePlatformSettingsRequest,
     oa_user_source_configured: bool,
 ) -> Result<(), AppError> {
+    if !matches!(
+        request.agent_provider.as_str(),
+        "builtin" | "openai-compatible"
+    ) {
+        return Err(AppError::bad_request("unsupported agent provider"));
+    }
+    if request.agent_provider != "builtin" {
+        let endpoint = request.agent_endpoint.as_deref().ok_or_else(|| {
+            AppError::bad_request("agent endpoint is required for external providers")
+        })?;
+        let url = url::Url::parse(endpoint)
+            .map_err(|_| AppError::bad_request("agent endpoint is invalid"))?;
+        if url.scheme() != "https" || url.host_str().is_none() {
+            return Err(AppError::bad_request("agent endpoint must be an HTTPS URL"));
+        }
+    }
     if !matches!(request.default_role.as_str(), "operator" | "viewer") {
         return Err(AppError::bad_request(
             "default role must be operator or viewer",
@@ -1038,6 +1115,12 @@ mod tests {
             cache_ttl_seconds: 45,
             cache_sync_seconds: 60,
             session_timeout_hours: 12,
+            agent_enabled: true,
+            agent_provider: "builtin".into(),
+            agent_endpoint: None,
+            agent_model: None,
+            agent_api_key: None,
+            agent_skill_markdown: None,
         };
         assert!(validate_platform_settings(&valid, true).is_ok());
 

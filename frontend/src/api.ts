@@ -6,7 +6,7 @@ import type {
   ResourceListResponse,
   ResourceRow,
   FileTreeResponse,
-  AuthCapabilities, AuthState, PlatformSettings, PlatformSettingsUpdate, RegistrationProfile, ResourceMapResponse,
+  AgentAnalysis, AuthCapabilities, AuthState, PlatformSettings, PlatformSettingsUpdate, RegistrationProfile, ResourceMapResponse,
   Role, SearchResult, User, UserSettings, AuditLog, MetricsSummary, PodContainersResponse, Notification, DiscoveryResource,
   ApplicationBuild, ApplicationWebhook, CreateGitCredentialPayload, CreateHostedApplicationPayload, GitCredential, HostedApplication, HostingCapabilities, UpdateHostedApplicationPayload,
 } from './types';
@@ -17,7 +17,7 @@ const mockNow = new Date().toISOString();
 const mockUser = { id: 'mock-admin', username: 'demo', displayName: '演示管理员', realName: '演示管理员', email: 'demo@kust.local', source: 'local', roles: ['admin'], disabled: false, passwordUnset: false, twoFactorEnabled: true, twoFactorRequired: true, twoFactorRememberDays: 7 };
 const mockCluster = { id: 'mock-cluster', name: '演示集群', description: '用于界面预览的本地演示集群', context: 'mock-context', server: 'https://kubernetes.mock.local', kubernetesVersion: 'v1.31.0', status: 'connected', createdAt: mockNow, lastConnectedAt: mockNow, warnings: 0, accent: '#0b8f5b', preset: true, readOnly: true, source: 'preset' };
 const mockSettings = { theme: 'dark', shellTheme: 'one-dark', pointerHighlight: false, refraction: false, backdropBlur: true, hoverMotion: true, autoRefresh: true, pageSize: 25, windowCloseConfirmation: true, twoFactorEnabled: true, twoFactorRequired: true, twoFactorRememberDays: 7 };
-const mockPlatform = { registrationEnabled: true, oaLoginEnabled: true, defaultRole: 'viewer', cacheTtlSeconds: 45, cacheSyncSeconds: 60, sessionTimeoutHours: 12, oaUserSourceConfigured: true, presetClustersReadOnly: true, updatedAt: mockNow };
+const mockPlatform = { registrationEnabled: true, oaLoginEnabled: true, defaultRole: 'viewer', cacheTtlSeconds: 45, cacheSyncSeconds: 60, sessionTimeoutHours: 12, oaUserSourceConfigured: true, presetClustersReadOnly: true, updatedAt: mockNow, agentEnabled: true, agentProvider: 'builtin', agentEndpoint: '', agentModel: '', agentSkillMarkdown: '# Kust Hosting Agent Skill\n\nUse evidence before suggestions.', agentSkillUpdatedAt: mockNow };
 const mockRoles = [
   { id: 'role-admin', name: 'admin', label: '管理员', permissions: ['clusters:*', 'resources:*', 'users:*', 'settings:*'], builtIn: true, createdAt: mockNow, updatedAt: mockNow },
   { id: 'role-operator', name: 'operator', label: '运维人员', permissions: ['clusters:read', 'resources:*'], builtIn: true, createdAt: mockNow, updatedAt: mockNow },
@@ -33,15 +33,17 @@ async function mockRequest<T>(path: string, init?: RequestInit): Promise<T> {
   if (path === '/auth/capabilities') return { registrationEnabled: true, oaLoginEnabled: true } as T;
   if (path === '/settings') return { ...mockSettings } as T;
   if (path === '/admin/settings') return { ...mockPlatform } as T;
+  if (path === '/admin/agent/skill' && init?.method === 'PUT') { const payload = JSON.parse(String(init.body || '{}')); mockPlatform.agentSkillMarkdown = String(payload.markdown || mockPlatform.agentSkillMarkdown); mockPlatform.agentSkillUpdatedAt = new Date().toISOString(); return { ...mockPlatform } as T; }
   if (path === '/admin/users') return [mockUser] as T;
   if (path === '/admin/roles') return mockRoles as T;
   if (path.startsWith('/admin/audit-logs')) return [] as T;
   if (path === '/clusters') return [mockCluster] as T;
-  if (path === '/hosting/capabilities') return { hostingEnabled: true, jenkinsConfigured: true, allowedNamespaces: ['default'], defaultNamespace: 'default' } as T;
+  if (path === '/hosting/capabilities') return { hostingEnabled: true, jenkinsConfigured: true, agentEnabled: true, agentProvider: 'builtin', allowedNamespaces: ['default'], defaultNamespace: 'default' } as T;
   if (path === '/hosting/credentials' && !init?.method) return mockCredentials as T;
   if (path === '/hosting/credentials' && init?.method === 'POST') { const payload = JSON.parse(String(init.body || '{}')); const credential = { id: `mock-credential-${Date.now()}`, name: payload.name, credentialType: payload.credentialType, username: payload.username, createdAt: mockNow, updatedAt: mockNow }; mockCredentials = [credential, ...mockCredentials]; return credential as T; }
   if (path.startsWith('/hosting/credentials/') && init?.method === 'DELETE') { mockCredentials = mockCredentials.filter((credential) => credential.id !== path.split('/').pop()); return undefined as T; }
   if (path === '/hosting/applications' && !init?.method) return mockApplications as T;
+  if (path === '/hosting/analyze' && init?.method === 'POST') { const payload = JSON.parse(String(init.body || '{}')); const celld = String(payload.repositoryUrl || '').includes('denoland/celld'); const analysis: AgentAnalysis = { provider: 'builtin', confidence: celld ? 0.96 : 0.76, framework: celld ? 'rust-daemon' : 'container-service', buildMode: 'dockerfile', containerPort: 8080, healthPath: '/', entrypoint: celld ? '["/usr/local/bin/celld"]' : undefined, requiredEnvironment: celld ? ['CELLD_BUCKET', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'] : [], optionalEnvironment: celld ? ['S3_ENDPOINT', 'AWS_REGION', 'CELLD_ADVERTISE', 'CELLD_ADDR'] : [], stateful: celld, needsPersistentStorage: celld, websocket: celld, warnings: celld ? ['这是有状态的 Durable Objects 服务，需要 S3 兼容存储和持久化运行配置。', '单副本适合验证，不代表生产高可用；多节点需要可互通的 CELLD_ADVERTISE。'] : [], evidence: celld ? ['Dockerfile', 'README.md', 'Cargo.toml'] : ['Dockerfile'], requiresReview: celld, analyzedAt: mockNow }; return analysis as T; }
   if (path === '/hosting/applications' && init?.method === 'POST') { const payload = JSON.parse(String(init.body || '{}')); const now = new Date().toISOString(); const slug = String(payload.name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''); const application: HostedApplication = { ...payload, id: `mock-app-${Date.now()}`, ownerUserId: 'mock-admin', slug, routePath: !payload.routePath || payload.routePath === '/' ? `/apps/${slug}` : payload.routePath, routeHost: payload.routeHost || 'apps.kust.local', gatewayName: payload.gatewayName || 'public-gateway', gatewayNamespace: payload.gatewayNamespace || 'gateway-system', webhookConfigured: false, createdAt: now, updatedAt: now }; mockApplications = [application, ...mockApplications]; return application as T; }
   if (path.startsWith('/hosting/applications/') && init?.method === 'PATCH') { const id = path.split('/')[3]; const payload = JSON.parse(String(init.body || '{}')); const now = new Date().toISOString(); const application = mockApplications.find((item) => item.id === id); if (!application) return undefined as T; const updated: HostedApplication = { ...application, ...payload, updatedAt: now }; mockApplications = mockApplications.map((item) => item.id === id ? updated : item); return updated as T; }
   if (path.startsWith('/hosting/applications/') && path.endsWith('/builds')) { const id = path.split('/')[3]; const build = mockApplications.find((application) => application.id === id)?.latestBuild; return (build ? [build] : []) as T; }
@@ -53,7 +55,7 @@ async function mockRequest<T>(path: string, init?: RequestInit): Promise<T> {
   if (path.includes('/resources/')) return { kind: 'ResourceList', items: [] } as T;
   if (path === '/health') return { status: 'ok', database: 'connected' } as T;
   if (init?.method === 'PUT' && path === '/settings') return { ...mockSettings } as T;
-  if (init?.method === 'PUT' && path === '/admin/settings') return { ...mockPlatform } as T;
+  if (init?.method === 'PUT' && path === '/admin/settings') { const payload = JSON.parse(String(init.body || '{}')); Object.assign(mockPlatform, payload); return { ...mockPlatform } as T; }
   return undefined as T;
 }
 
@@ -115,6 +117,7 @@ export const api = {
   roles: () => request<Role[]>('/admin/roles'),
   platformSettings: () => request<PlatformSettings>('/admin/settings'),
   updatePlatformSettings: (settings: PlatformSettingsUpdate) => request<PlatformSettings>('/admin/settings', { method: 'PUT', body: JSON.stringify(settings) }),
+  updateAgentSkill: (markdown: string) => request<PlatformSettings>('/admin/agent/skill', { method: 'PUT', body: JSON.stringify({ markdown }) }),
   updateRoles: (id: string, roles: string[]) => request<User>(`/admin/users/${id}/roles`, { method: 'PATCH', body: JSON.stringify({ roles }) }),
   updateUserStatus: (id: string, disabled: boolean) => request<User>(`/admin/users/${id}/status`, { method: 'PATCH', body: JSON.stringify({ disabled }) }),
   adminResetCode: (id: string) => request<{ username: string; code: string; expiresInMinutes: number }>(`/admin/users/${id}/reset-code`, { method: 'POST' }),
@@ -223,6 +226,7 @@ export const api = {
   createHostingCredential: (payload: CreateGitCredentialPayload) => request<GitCredential>('/hosting/credentials', { method: 'POST', body: JSON.stringify(payload) }),
   deleteHostingCredential: (id: string) => request<void>(`/hosting/credentials/${id}`, { method: 'DELETE' }),
   hostedApplications: () => request<HostedApplication[]>('/hosting/applications'),
+  analyzeHostedApplication: (repositoryUrl: string, gitRef: string, credentialId?: string, sourceSubdirectory?: string) => request<AgentAnalysis>('/hosting/analyze', { method: 'POST', body: JSON.stringify({ repositoryUrl, gitRef, credentialId, sourceSubdirectory: sourceSubdirectory || undefined }) }),
   createHostedApplication: (payload: CreateHostedApplicationPayload) => request<HostedApplication>('/hosting/applications', { method: 'POST', body: JSON.stringify(payload) }),
   updateHostedApplication: (id: string, payload: UpdateHostedApplicationPayload) => request<HostedApplication>(`/hosting/applications/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   redeployHostedApplication: (id: string) => request<ApplicationBuild>(`/hosting/applications/${id}/redeploy`, { method: 'POST' }),

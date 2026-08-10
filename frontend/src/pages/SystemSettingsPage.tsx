@@ -1,9 +1,11 @@
 import {
   Activity,
+  Bot,
   Check,
   Clock,
   ChevronRight,
   Database,
+  FileUp,
   KeyRound,
   LoaderCircle,
   RefreshCw,
@@ -23,7 +25,7 @@ import { Button, EmptyState, Modal, SelectMenu, useToast } from '../components/u
 import { useData } from '../data-context';
 import type { AuditLog, PlatformSettings, PlatformSettingsUpdate, Role, User } from '../types';
 
-type SystemView = 'general' | 'users' | 'roles' | 'audit';
+type SystemView = 'general' | 'agent' | 'users' | 'roles' | 'audit';
 
 interface ResetCode {
   username: string;
@@ -50,6 +52,10 @@ function updatePayload(settings: PlatformSettings): PlatformSettingsUpdate {
     cacheTtlSeconds: settings.cacheTtlSeconds,
     cacheSyncSeconds: settings.cacheSyncSeconds,
     sessionTimeoutHours: settings.sessionTimeoutHours,
+    agentEnabled: settings.agentEnabled,
+    agentProvider: settings.agentProvider,
+    agentEndpoint: settings.agentEndpoint,
+    agentModel: settings.agentModel,
   };
 }
 
@@ -73,9 +79,11 @@ export function SystemSettingsPage() {
   const [resetTarget, setResetTarget] = useState<User>();
   const [resetCode, setResetCode] = useState<ResetCode>();
   const [resetting, setResetting] = useState(false);
+  const [agentApiKey, setAgentApiKey] = useState('');
 
   const views: { value: SystemView; label: string; description: string; icon: React.ReactNode }[] = [
     { value: 'general', label: '平台', description: '访问、缓存与运行状态', icon: <Server size={18} /> },
+    { value: 'agent', label: '托管 Agent', description: '供应商、模型与部署 Skill', icon: <Bot size={18} /> },
     { value: 'users', label: '用户', description: '账号状态与安全管理', icon: <Users size={18} /> },
     { value: 'roles', label: '角色', description: '权限与成员概览', icon: <ShieldCheck size={18} /> },
     { value: 'audit', label: '审计', description: '管理员操作记录', icon: <Activity size={18} /> },
@@ -109,7 +117,7 @@ export function SystemSettingsPage() {
 
   useEffect(() => { void load(); }, [load]);
 
-  const dirty = Boolean(settings && draft && JSON.stringify(updatePayload(settings)) !== JSON.stringify(updatePayload(draft)));
+  const dirty = Boolean(settings && draft && JSON.stringify({ ...updatePayload(settings), agentSkillMarkdown: settings.agentSkillMarkdown }) !== JSON.stringify({ ...updatePayload(draft), agentSkillMarkdown: draft.agentSkillMarkdown }) || agentApiKey.trim());
   const roleOptions = roles.map((role) => ({ value: role.name, label: role.label }));
   const defaultRoleOptions = roleOptions.filter((role) => role.value !== 'admin');
   const visibleUsers = useMemo(() => {
@@ -138,9 +146,11 @@ export function SystemSettingsPage() {
     if (!draft) return;
     setSaving(true);
     try {
-      const updated = await api.updatePlatformSettings(updatePayload(draft));
-      setSettings(updated);
-      setDraft(updated);
+      const updated = await api.updatePlatformSettings({ ...updatePayload(draft), agentApiKey: agentApiKey || undefined, agentSkillMarkdown: undefined });
+      const finalSettings = updated.agentSkillMarkdown !== draft.agentSkillMarkdown ? await api.updateAgentSkill(draft.agentSkillMarkdown) : updated;
+      setSettings(finalSettings);
+      setDraft(finalSettings);
+      setAgentApiKey('');
       pushToast('系统设置已保存');
     } catch (reason) {
       pushToast(reason instanceof Error ? reason.message : '系统设置保存失败', 'error');
@@ -218,7 +228,7 @@ export function SystemSettingsPage() {
         <div><span className="eyebrow">administration</span><h2>系统设置</h2></div>
         <div className="page-actions">
           <Button variant="ghost" icon={<RefreshCw size={16} />} onClick={() => void load()} disabled={loading}>刷新</Button>
-          {view === 'general' && <Button variant="primary" icon={<Check size={17} />} onClick={() => void saveSettings()} disabled={!dirty || saving}>{saving ? '保存中' : '保存设置'}</Button>}
+          {(view === 'general' || view === 'agent') && <Button variant="primary" icon={<Check size={17} />} onClick={() => void saveSettings()} disabled={!dirty || saving}>{saving ? '保存中' : '保存设置'}</Button>}
         </div>
       </header>
 
@@ -269,6 +279,26 @@ export function SystemSettingsPage() {
               <div><Server size={15} /><span>预设集群配置</span><strong>{draft.presetClustersReadOnly ? '只读保护' : '可修改'}</strong></div>
               <div><Clock size={15} /><span>最近更新</span><strong>{new Date(draft.updatedAt).toLocaleString()}</strong></div>
             </div>
+              </section>
+            </div>
+          )}
+
+          {view === 'agent' && (
+            <div id="system-settings-panel-agent" aria-labelledby="system-settings-nav-agent" className="settings-panel system-settings-stack">
+              <section className="settings-section glass-card">
+                <header><Bot size={19} /><div><h3>托管编排 Agent</h3><p>所有新建托管应用都会先生成受限的部署计划，再由 Kust 策略校验和发布。</p></div></header>
+                <div className="setting-row"><div><strong>启用部署 Agent</strong><span>关闭后不允许新建托管应用，避免跳过项目分析。</span></div><label className="switch-control"><input aria-label="启用部署 Agent" type="checkbox" checked={draft.agentEnabled} onChange={(event) => setDraft({ ...draft, agentEnabled: event.target.checked })} /><i /></label></div>
+                <div className="setting-row"><div><strong>供应商</strong><span>未配置供应商时使用 Kust 内置规则 Agent；密钥只以加密形式保存在服务端。</span></div><div className="system-setting-select"><SelectMenu aria-label="Agent 供应商" value={draft.agentProvider} options={[{ value: 'builtin', label: 'Kust 内置 Agent' }, { value: 'openai-compatible', label: 'OpenAI 兼容接口' }]} onChange={(agentProvider) => setDraft({ ...draft, agentProvider })} /></div></div>
+                {draft.agentProvider !== 'builtin' && <>
+                  <div className="setting-row"><div><strong>接口地址</strong><span>只接受供应商的 HTTPS API 根地址。</span></div><input className="system-inline-input" aria-label="Agent 接口地址" value={draft.agentEndpoint || ''} onChange={(event) => setDraft({ ...draft, agentEndpoint: event.target.value })} placeholder="https://api.example.com/v1" /></div>
+                  <div className="setting-row"><div><strong>模型</strong><span>用于生成结构化部署建议。</span></div><input className="system-inline-input" aria-label="Agent 模型" value={draft.agentModel || ''} onChange={(event) => setDraft({ ...draft, agentModel: event.target.value })} placeholder="model-name" /></div>
+                  <div className="setting-row"><div><strong>API Key</strong><span>留空则保留既有密钥，密钥不会再次返回浏览器。</span></div><input className="system-inline-input" aria-label="Agent API Key" type="password" value={agentApiKey} onChange={(event) => setAgentApiKey(event.target.value)} placeholder="输入新的 API Key" /></div>
+                </>}
+              </section>
+              <section className="settings-section glass-card">
+                <header><FileUp size={19} /><div><h3>部署 Skill</h3><p>Skill 是 Agent 的项目分析与安全边界说明。更新后立即用于后续托管分析。</p></div></header>
+                <label className="field"><span>hosting-skill.md</span><textarea aria-label="部署 Skill" rows={16} value={draft.agentSkillMarkdown} onChange={(event) => setDraft({ ...draft, agentSkillMarkdown: event.target.value })} spellCheck={false} /></label>
+                <label className="skill-upload"><FileUp size={16} /><span>重新上传 Skill.md</span><input aria-label="重新上传 Skill.md" type="file" accept=".md,text/markdown,text/plain" onChange={(event) => { const file = event.target.files?.[0]; if (!file) return; void file.text().then((agentSkillMarkdown) => setDraft({ ...draft, agentSkillMarkdown })); event.target.value = ''; }} /></label>
               </section>
             </div>
           )}

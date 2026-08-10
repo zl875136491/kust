@@ -111,6 +111,31 @@ pub struct HostedApplicationDocument {
     pub webhook_secret_encrypted: Option<String>,
     pub created_at: DateTime,
     pub updated_at: DateTime,
+    #[serde(default)]
+    pub agent_analysis: Option<AgentAnalysisResponse>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentAnalysisResponse {
+    #[serde(default)]
+    pub provider: String,
+    pub confidence: f64,
+    pub framework: String,
+    pub build_mode: String,
+    pub container_port: i32,
+    pub health_path: String,
+    pub entrypoint: Option<String>,
+    pub required_environment: Vec<String>,
+    pub optional_environment: Vec<String>,
+    pub stateful: bool,
+    pub needs_persistent_storage: bool,
+    pub websocket: bool,
+    pub warnings: Vec<String>,
+    pub evidence: Vec<String>,
+    #[serde(default)]
+    pub requires_review: bool,
+    pub analyzed_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -178,6 +203,7 @@ pub struct HostedApplicationResponse {
     pub created_at: String,
     pub updated_at: String,
     pub latest_build: Option<ApplicationBuildResponse>,
+    pub agent_analysis: Option<AgentAnalysisResponse>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -275,6 +301,9 @@ pub struct CreateHostedApplicationRequest {
     pub gateway_namespace: Option<String>,
     #[serde(default)]
     pub auto_deploy: bool,
+    #[serde(default)]
+    pub agent_review_acknowledged: bool,
+    pub agent_analysis: Option<AgentAnalysisResponse>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -879,6 +908,30 @@ pub struct PlatformSettingsDocument {
     pub updated_at: DateTime,
     #[serde(default)]
     pub updated_by: Option<ObjectId>,
+    #[serde(default = "default_agent_enabled")]
+    pub agent_enabled: bool,
+    #[serde(default = "default_agent_provider")]
+    pub agent_provider: String,
+    #[serde(default)]
+    pub agent_endpoint: Option<String>,
+    #[serde(default)]
+    pub agent_model: Option<String>,
+    #[serde(default)]
+    pub agent_api_key_encrypted: Option<String>,
+    #[serde(default = "default_agent_skill")]
+    pub agent_skill_markdown: String,
+    #[serde(default)]
+    pub agent_skill_updated_at: Option<DateTime>,
+}
+
+fn default_agent_enabled() -> bool {
+    true
+}
+fn default_agent_provider() -> String {
+    "builtin".into()
+}
+fn default_agent_skill() -> String {
+    include_str!("../agent/hosting-skill.md").into()
 }
 
 impl PlatformSettingsDocument {
@@ -893,6 +946,14 @@ impl PlatformSettingsDocument {
             oa_user_source_configured,
             preset_clusters_read_only: true,
             updated_at: self.updated_at.try_to_rfc3339_string().unwrap_or_default(),
+            agent_enabled: self.agent_enabled,
+            agent_provider: self.agent_provider.clone(),
+            agent_endpoint: self.agent_endpoint.clone(),
+            agent_model: self.agent_model.clone(),
+            agent_skill_markdown: self.agent_skill_markdown.clone(),
+            agent_skill_updated_at: self
+                .agent_skill_updated_at
+                .and_then(|value| value.try_to_rfc3339_string().ok()),
         }
     }
 }
@@ -909,6 +970,12 @@ pub struct PlatformSettingsResponse {
     pub oa_user_source_configured: bool,
     pub preset_clusters_read_only: bool,
     pub updated_at: String,
+    pub agent_enabled: bool,
+    pub agent_provider: String,
+    pub agent_endpoint: Option<String>,
+    pub agent_model: Option<String>,
+    pub agent_skill_markdown: String,
+    pub agent_skill_updated_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -920,6 +987,14 @@ pub struct UpdatePlatformSettingsRequest {
     pub cache_ttl_seconds: i64,
     pub cache_sync_seconds: i64,
     pub session_timeout_hours: i64,
+    #[serde(default = "default_agent_enabled")]
+    pub agent_enabled: bool,
+    #[serde(default = "default_agent_provider")]
+    pub agent_provider: String,
+    pub agent_endpoint: Option<String>,
+    pub agent_model: Option<String>,
+    pub agent_api_key: Option<String>,
+    pub agent_skill_markdown: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -98,6 +98,10 @@ pub fn router(state: SharedState, config: &AppConfig) -> Result<Router, AppError
             get(auth_routes::admin_platform_settings).put(auth_routes::update_platform_settings),
         )
         .route(
+            "/api/admin/agent/skill",
+            axum::routing::put(auth_routes::update_agent_skill),
+        )
+        .route(
             "/api/admin/users/{user_id}/roles",
             patch(auth_routes::update_roles),
         )
