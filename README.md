@@ -343,7 +343,7 @@ npm run dev
 
 托管应用创建默认经过 Kust 的部署 Agent。用户只需提供仓库地址、分支、目标集群/命名空间和明确的运行环境变量；Agent 会在创建前读取受限的 `README.md`、`Dockerfile`、`Cargo.toml`、`package.json` 等项目证据，生成结构化部署计划。计划包含构建模式、端口、健康检查、入口、必需环境变量、持久化/WebSocket 特征、风险和证据。
 
-内置 Agent 是确定性的规则实现，未配置供应商时直接使用；管理员可在“系统设置 -> 托管 Agent”选择 OpenAI 兼容供应商、配置 HTTPS Endpoint/模型/API Key，并编辑或重新上传 `hosting-skill.md`。Skill 和供应商密钥只由后端保存，API Key 使用 Kust 加密密钥加密，浏览器不会读取已有密钥。源码证据支持 GitHub、GitLab.com 和允许列表中的自托管 GitLab，读取范围限制为常见清单、Dockerfile、README 和构建配置；发送给外部供应商前会过滤明显的密钥/密码行。
+内置 Agent 是确定性的规则实现，未配置供应商时直接使用；管理员可在“系统设置 -> 托管 Agent”选择 OpenAI 兼容供应商、配置 HTTP 或 HTTPS Endpoint/模型/API Key，并编辑或重新上传 `hosting-skill.md`。HTTP 仅建议用于受信任的内网服务，生产供应商应使用 HTTPS。Skill 和供应商密钥只由后端保存，API Key 使用 Kust 加密密钥加密，浏览器不会读取已有密钥。源码证据支持 GitHub、GitLab.com 和允许列表中的自托管 GitLab，读取范围限制为常见清单、Dockerfile、README 和构建配置；发送给外部供应商前会过滤明显的密钥/密码行。
 
 Agent 只有建议权限，不能访问 Kubernetes、Jenkins 或集群凭证。后端会在实际创建时重新分析仓库并校验 Agent 输出，客户端传入的分析结果不具备信任级别；最终仍由 Kust 的仓库 SSRF 校验、镜像 digest 校验、命名空间/Gateway 策略和 Kubernetes 发布流程决定是否可部署。Skill 默认要求有状态项目进行人工确认；确认只代表用户已提供运行环境变量，不会授予 Agent 写入集群的权限。
 

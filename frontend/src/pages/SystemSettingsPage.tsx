@@ -59,6 +59,15 @@ function updatePayload(settings: PlatformSettings): PlatformSettingsUpdate {
   };
 }
 
+function endpointProtocol(endpoint?: string): 'http' | 'https' {
+  return endpoint?.trim().toLowerCase().startsWith('http://') ? 'http' : 'https';
+}
+
+function withEndpointProtocol(endpoint: string | undefined, protocol: 'http' | 'https') {
+  const address = (endpoint || '').trim().replace(/^https?:\/\//i, '');
+  return address ? `${protocol}://${address}` : `${protocol}://`;
+}
+
 export function SystemSettingsPage() {
   const { user: currentUser } = useAuth();
   const { clusters } = useData();
@@ -120,6 +129,7 @@ export function SystemSettingsPage() {
   const dirty = Boolean(settings && draft && JSON.stringify({ ...updatePayload(settings), agentSkillMarkdown: settings.agentSkillMarkdown }) !== JSON.stringify({ ...updatePayload(draft), agentSkillMarkdown: draft.agentSkillMarkdown }) || agentApiKey.trim());
   const roleOptions = roles.map((role) => ({ value: role.name, label: role.label }));
   const defaultRoleOptions = roleOptions.filter((role) => role.value !== 'admin');
+  const agentProtocol = endpointProtocol(draft?.agentEndpoint);
   const visibleUsers = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return users;
@@ -290,7 +300,7 @@ export function SystemSettingsPage() {
                 <div className="setting-row"><div><strong>启用部署 Agent</strong><span>关闭后不允许新建托管应用，避免跳过项目分析。</span></div><label className="switch-control"><input aria-label="启用部署 Agent" type="checkbox" checked={draft.agentEnabled} onChange={(event) => setDraft({ ...draft, agentEnabled: event.target.checked })} /><i /></label></div>
                 <div className="setting-row"><div><strong>供应商</strong><span>未配置供应商时使用 Kust 内置规则 Agent；密钥只以加密形式保存在服务端。</span></div><div className="system-setting-select"><SelectMenu aria-label="Agent 供应商" value={draft.agentProvider} options={[{ value: 'builtin', label: 'Kust 内置 Agent' }, { value: 'openai-compatible', label: 'OpenAI 兼容接口' }]} onChange={(agentProvider) => setDraft({ ...draft, agentProvider })} /></div></div>
                 {draft.agentProvider !== 'builtin' && <>
-                  <div className="setting-row"><div><strong>接口地址</strong><span>只接受供应商的 HTTPS API 根地址。</span></div><input className="system-inline-input" aria-label="Agent 接口地址" value={draft.agentEndpoint || ''} onChange={(event) => setDraft({ ...draft, agentEndpoint: event.target.value })} placeholder="https://api.example.com/v1" /></div>
+                  <div className="setting-row agent-endpoint-row"><div><strong>接口地址</strong><span>{agentProtocol === 'http' ? 'HTTP 仅建议用于受信任的内网服务，API Key 将以明文传输。' : 'HTTPS 用于加密传输的供应商 API 根地址。'}</span></div><div className="agent-endpoint-control"><div className="agent-protocol-switch" role="group" aria-label="Agent 接口协议"><button type="button" className={agentProtocol === 'https' ? 'is-active' : ''} aria-pressed={agentProtocol === 'https'} onClick={() => setDraft({ ...draft, agentEndpoint: withEndpointProtocol(draft.agentEndpoint, 'https') })}>HTTPS</button><button type="button" className={agentProtocol === 'http' ? 'is-active' : ''} aria-pressed={agentProtocol === 'http'} onClick={() => setDraft({ ...draft, agentEndpoint: withEndpointProtocol(draft.agentEndpoint, 'http') })}>HTTP</button></div><input className="system-inline-input" aria-label="Agent 接口地址" value={draft.agentEndpoint || ''} onChange={(event) => setDraft({ ...draft, agentEndpoint: event.target.value })} placeholder={`${agentProtocol}://api.example.com/v1`} /></div></div>
                   <div className="setting-row"><div><strong>模型</strong><span>用于生成结构化部署建议。</span></div><input className="system-inline-input" aria-label="Agent 模型" value={draft.agentModel || ''} onChange={(event) => setDraft({ ...draft, agentModel: event.target.value })} placeholder="model-name" /></div>
                   <div className="setting-row"><div><strong>API Key</strong><span>留空则保留既有密钥，密钥不会再次返回浏览器。</span></div><input className="system-inline-input" aria-label="Agent API Key" type="password" value={agentApiKey} onChange={(event) => setAgentApiKey(event.target.value)} placeholder="输入新的 API Key" /></div>
                 </>}

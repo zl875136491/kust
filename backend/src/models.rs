@@ -978,7 +978,7 @@ pub struct PlatformSettingsResponse {
     pub agent_skill_updated_at: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdatePlatformSettingsRequest {
     pub registration_enabled: bool,

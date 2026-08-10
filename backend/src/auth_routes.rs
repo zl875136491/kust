@@ -754,8 +754,10 @@ fn validate_platform_settings(
         })?;
         let url = url::Url::parse(endpoint)
             .map_err(|_| AppError::bad_request("agent endpoint is invalid"))?;
-        if url.scheme() != "https" || url.host_str().is_none() {
-            return Err(AppError::bad_request("agent endpoint must be an HTTPS URL"));
+        if !matches!(url.scheme(), "https" | "http") || url.host_str().is_none() {
+            return Err(AppError::bad_request(
+                "agent endpoint must be an HTTP or HTTPS URL",
+            ));
         }
     }
     if !matches!(request.default_role.as_str(), "operator" | "viewer") {
@@ -1130,5 +1132,41 @@ mod tests {
             ..valid
         };
         assert!(validate_platform_settings(&invalid, true).is_err());
+    }
+
+    #[test]
+    fn accepts_http_and_https_agent_endpoints() {
+        let request = UpdatePlatformSettingsRequest {
+            registration_enabled: true,
+            oa_login_enabled: false,
+            default_role: "viewer".into(),
+            cache_ttl_seconds: 45,
+            cache_sync_seconds: 60,
+            session_timeout_hours: 12,
+            agent_enabled: true,
+            agent_provider: "openai-compatible".into(),
+            agent_endpoint: Some("http://agent.internal:8080/v1".into()),
+            agent_model: Some("local-model".into()),
+            agent_api_key: None,
+            agent_skill_markdown: None,
+        };
+
+        assert!(validate_platform_settings(&request, true).is_ok());
+        assert!(validate_platform_settings(
+            &UpdatePlatformSettingsRequest {
+                agent_endpoint: Some("https://agent.example.com/v1".into()),
+                ..request.clone()
+            },
+            true
+        )
+        .is_ok());
+        assert!(validate_platform_settings(
+            &UpdatePlatformSettingsRequest {
+                agent_endpoint: Some("ftp://agent.internal/v1".into()),
+                ..request
+            },
+            true
+        )
+        .is_err());
     }
 }
