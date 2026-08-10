@@ -293,9 +293,17 @@ export interface ApplicationBuild {
   imageRef?: string;
   imageDigestRef?: string;
   message?: string;
+  progress: ApplicationBuildProgressEvent[];
   createdAt: string;
   startedAt?: string;
   finishedAt?: string;
+}
+
+export interface ApplicationBuildProgressEvent {
+  stage: 'queued' | 'source' | 'checkout' | 'build' | 'push' | 'deploy';
+  state: 'running' | 'succeeded' | 'failed';
+  message: string;
+  createdAt: string;
 }
 
 export interface HostedApplication {

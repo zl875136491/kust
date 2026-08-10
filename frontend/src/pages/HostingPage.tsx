@@ -1,7 +1,9 @@
-import { ArrowUpRight, CirclePlus, Clock3, ExternalLink, GitBranch, KeyRound, Link2, LoaderCircle, PackageCheck, RefreshCw, RotateCcw, Rocket, Settings2, ShieldCheck, Trash2, Bot, AlertTriangle, CheckCircle2 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { ArrowUpRight, CirclePlus, Clock3, ExternalLink, GitBranch, KeyRound, Link2, LoaderCircle, PackageCheck, RefreshCw, RotateCcw, Rocket, Settings2, ShieldCheck, Trash2, Bot, AlertTriangle, CheckCircle2, Check, Circle, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../api';
 import { useData } from '../data-context';
+import { motionDuration, useEscapeLayer } from '../hooks/useEscapeLayer';
 import type { AgentAnalysis, ApplicationBuild, ApplicationWebhook, CreateGitCredentialPayload, CreateHostedApplicationPayload, GitCredential, HostedApplication, HostingCapabilities } from '../types';
 import { Button, EmptyState, IconButton, Modal, SelectMenu, Spinner, StatusPill, useToast } from '../components/ui';
 
@@ -51,6 +53,12 @@ export function HostingPage() {
   const [webhook, setWebhook] = useState<ApplicationWebhook>();
   const [compatibility, setCompatibility] = useState<HostedApplication>();
   const [pendingAction, setPendingAction] = useState<{ application: HostedApplication; type: 'redeploy' | 'rebuild' | 'rollback' | 'delete' }>();
+  const updateBuilds = useCallback((applicationId: string, builds: ApplicationBuild[]) => {
+    const latestBuild = builds[0];
+    if (!latestBuild) return;
+    setApplications((current) => current.map((item) => item.id === applicationId ? { ...item, latestBuild } : item));
+    setSelected((current) => current?.id === applicationId ? { ...current, latestBuild } : current);
+  }, []);
 
   const reload = useCallback(async ({ initial = false, reportError = true }: { initial?: boolean; reportError?: boolean } = {}) => {
     try {
@@ -71,7 +79,7 @@ export function HostingPage() {
   }, [applications, compatibility, createOpen, credentialOpen, pendingAction, reload, selected]);
 
   const deploy = async (application: HostedApplication) => {
-    try { const build = await api.deployHostedApplication(application.id); setApplications((current) => current.map((item) => item.id === application.id ? { ...item, latestBuild: build } : item)); pushToast(`已触发 ${application.name} 的构建`); } catch (error) { pushToast(error instanceof Error ? error.message : '无法触发部署', 'error'); }
+    try { const build = await api.deployHostedApplication(application.id); setApplications((current) => current.map((item) => item.id === application.id ? { ...item, latestBuild: build } : item)); setSelected((current) => current?.id === application.id ? { ...current, latestBuild: build } : current); pushToast(`已触发 ${application.name} 的构建`); } catch (error) { pushToast(error instanceof Error ? error.message : '无法触发部署', 'error'); }
   };
   const redeploy = async (application: HostedApplication) => {
     try { const build = await api.redeployHostedApplication(application.id); setApplications((current) => current.map((item) => item.id === application.id ? { ...item, latestBuild: build } : item)); setSelected((current) => current?.id === application.id ? { ...current, latestBuild: build } : current); pushToast(`正在重新发布 ${application.name}`); } catch (error) { pushToast(error instanceof Error ? error.message : '无法重新发布应用', 'error'); }
@@ -106,7 +114,7 @@ export function HostingPage() {
     </section>}
     <CreateApplicationModal open={createOpen} clusters={clusters} credentials={credentials} capabilities={capabilities} onClose={() => setCreateOpen(false)} onCreated={(application) => { setApplications((current) => [application, ...current]); setCreateOpen(false); void deploy(application); }} />
     <CredentialsModal open={credentialOpen} credentials={credentials} onClose={() => setCredentialOpen(false)} onChanged={setCredentials} />
-    <ApplicationDetailModal application={selected} onClose={() => { setSelected(undefined); setWebhook(undefined); }} onDeploy={deploy} onRedeploy={redeploy} onConfigureCompatibility={setCompatibility} webhook={webhook} onConfigureWebhook={async (application) => { try { const value = await api.rotateHostedApplicationWebhook(application.id); setWebhook(value); setApplications((current) => current.map((item) => item.id === application.id ? { ...item, webhookConfigured: true } : item)); setSelected((current) => current?.id === application.id ? { ...current, webhookConfigured: true } : current); pushToast('GitLab Webhook 密钥已生成，仅在当前窗口展示一次'); } catch (error) { pushToast(error instanceof Error ? error.message : '无法生成 GitLab Webhook 配置', 'error'); } }} />
+    <ApplicationDetailDrawer application={selected} onClose={() => { setSelected(undefined); setWebhook(undefined); }} onDeploy={deploy} onRedeploy={redeploy} onConfigureCompatibility={setCompatibility} onBuildsUpdated={updateBuilds} webhook={webhook} onConfigureWebhook={async (application) => { try { const value = await api.rotateHostedApplicationWebhook(application.id); setWebhook(value); setApplications((current) => current.map((item) => item.id === application.id ? { ...item, webhookConfigured: true } : item)); setSelected((current) => current?.id === application.id ? { ...current, webhookConfigured: true } : current); pushToast('GitLab Webhook 密钥已生成，仅在当前窗口展示一次'); } catch (error) { pushToast(error instanceof Error ? error.message : '无法生成 GitLab Webhook 配置', 'error'); } }} />
     <CompatibilityModal application={compatibility} onClose={() => setCompatibility(undefined)} onSaved={(application) => { setApplications((current) => current.map((item) => item.id === application.id ? application : item)); setSelected((current) => current?.id === application.id ? application : current); setCompatibility(undefined); pushToast('兼容性设置已保存，请重新部署应用'); }} />
     <Modal open={Boolean(pendingAction)} onClose={() => setPendingAction(undefined)} title={pendingAction ? actionTitle(pendingAction.type, pendingAction.application.name) : ''} width="480px" footer={(requestClose) => <><Button variant="ghost" onClick={requestClose}>取消</Button><Button variant={pendingAction?.type === 'delete' ? 'danger' : 'primary'} icon={pendingAction?.type === 'delete' ? <Trash2 size={16} /> : pendingAction?.type === 'rollback' ? <RotateCcw size={16} /> : pendingAction?.type === 'rebuild' ? <Rocket size={16} /> : <RefreshCw size={16} />} onClick={() => void confirmAction()}>{pendingAction?.type === 'delete' ? '删除应用' : '确认执行'}</Button></>}>
       <p className="confirm-copy">{pendingAction && actionDescription(pendingAction.type, pendingAction.application.name)}</p>
@@ -208,11 +216,58 @@ function CompatibilityModal({ application, onClose, onSaved }: { application?: H
   </Modal>;
 }
 
-function ApplicationDetailModal({ application, onClose, onDeploy, onRedeploy, onConfigureCompatibility, webhook, onConfigureWebhook }: { application?: HostedApplication; onClose: () => void; onDeploy: (application: HostedApplication) => void; onRedeploy: (application: HostedApplication) => void; onConfigureCompatibility: (application: HostedApplication) => void; webhook?: ApplicationWebhook; onConfigureWebhook: (application: HostedApplication) => Promise<void> }) {
-  const { pushToast } = useToast(); const [builds, setBuilds] = useState<ApplicationBuild[]>([]); const [loading, setLoading] = useState(false);
-  useEffect(() => { if (!application) { setBuilds([]); return; } setLoading(true); api.hostedApplicationBuilds(application.id).then(setBuilds).catch((error) => pushToast(error instanceof Error ? error.message : '无法读取构建记录', 'error')).finally(() => setLoading(false)); }, [application, pushToast]);
-  if (!application) return null; const routePath = application.routePath.endsWith('/') ? application.routePath : `${application.routePath}/`; const url = `http://${application.routeHost}${routePath}`;
-  return <Modal open onClose={onClose} title={application.name} description={`${application.clusterId} · ${application.namespace} · ${application.buildMode}`} width="880px" footer={<><a className="button button--secondary" href={url} target="_blank" rel="noreferrer"><ExternalLink size={16} /><span>访问路由</span></a><Button variant="secondary" icon={<Settings2 size={16} />} onClick={() => onConfigureCompatibility(application)}>兼容性</Button><Button variant="secondary" icon={<RefreshCw size={16} />} onClick={() => onRedeploy(application)}>重新发布</Button><Button variant="primary" icon={<Rocket size={16} />} onClick={() => onDeploy(application)}>重新构建</Button></>}>
-    <div className="application-detail"><section className="application-detail__route"><ArrowUpRight size={18} /><div><strong>{application.routeHost}{application.routePath}</strong><small>Gateway: {application.gatewayNamespace}/{application.gatewayName}</small></div><StatusPill status={application.latestBuild?.status === 'succeeded' ? '已发布' : application.latestBuild?.status || '未部署'} /></section><section className="application-webhook"><header><div><Link2 size={16} /><span><strong>GitLab 自动部署</strong><small>{application.autoDeploy ? '匹配的分支或 Tag push 会触发构建。' : '请先在编辑应用时启用自动部署。'}</small></span></div><Button variant="secondary" icon={<KeyRound size={15} />} onClick={() => void onConfigureWebhook(application)}>{application.webhookConfigured ? '轮换密钥' : '生成 Webhook'}</Button></header>{webhook && <div className="application-webhook__secret"><label><span>Webhook URL</span><code>{webhook.url}</code></label><label><span>Secret Token（仅展示一次）</span><code>{webhook.secret}</code></label></div>}</section><section><h3>构建历史</h3>{loading ? <div className="detail-loading"><LoaderCircle className="spin" size={17} />加载构建记录</div> : <div className="build-history">{builds.length ? builds.map((build) => <article key={build.id}><StatusPill status={build.status === 'succeeded' ? '成功' : build.status === 'running' ? '构建中' : build.status === 'failed' ? '失败' : build.status} /><div><strong>{build.gitCommit ? build.gitCommit.slice(0, 12) : build.gitRef}</strong><small>{build.message || '等待 Jenkins 回传状态'}</small></div><time>{formatDate(build.createdAt)}</time>{build.jenkinsBuildUrl && <a href={build.jenkinsBuildUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} /></a>}</article>) : <span className="muted-cell">尚无构建记录</span>}</div>}</section></div>
-  </Modal>;
+const buildStages = [
+  { id: 'queued', label: '排队' },
+  { id: 'source', label: '源码' },
+  { id: 'checkout', label: '检出' },
+  { id: 'build', label: '构建' },
+  { id: 'push', label: '推送' },
+  { id: 'deploy', label: '发布' },
+] as const;
+
+function ApplicationDetailDrawer({ application, onClose, onDeploy, onRedeploy, onConfigureCompatibility, onBuildsUpdated, webhook, onConfigureWebhook }: { application?: HostedApplication; onClose: () => void; onDeploy: (application: HostedApplication) => void; onRedeploy: (application: HostedApplication) => void; onConfigureCompatibility: (application: HostedApplication) => void; onBuildsUpdated: (applicationId: string, builds: ApplicationBuild[]) => void; webhook?: ApplicationWebhook; onConfigureWebhook: (application: HostedApplication) => Promise<void> }) {
+  const { pushToast } = useToast();
+  const [builds, setBuilds] = useState<ApplicationBuild[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const closeTimer = useRef<number | undefined>(undefined);
+  const activeBuild = builds[0] || application?.latestBuild;
+  const refreshBuilds = useCallback(async (initial = false) => {
+    if (!application) return;
+    if (initial) setLoading(true);
+    try {
+      const next = await api.hostedApplicationBuilds(application.id);
+      setBuilds(next);
+      onBuildsUpdated(application.id, next);
+    } catch (error) {
+      if (initial) pushToast(error instanceof Error ? error.message : '无法读取构建记录', 'error');
+    } finally {
+      if (initial) setLoading(false);
+    }
+  }, [application, onBuildsUpdated, pushToast]);
+  useEffect(() => {
+    if (!application) { setBuilds([]); setClosing(false); return; }
+    void refreshBuilds(true);
+  }, [application, refreshBuilds]);
+  useEffect(() => {
+    if (!application || !['queued', 'running'].includes(activeBuild?.status || '')) return;
+    const timer = window.setInterval(() => void refreshBuilds(), 3000);
+    return () => window.clearInterval(timer);
+  }, [activeBuild?.status, application, refreshBuilds]);
+  useEffect(() => () => { if (closeTimer.current !== undefined) window.clearTimeout(closeTimer.current); }, []);
+  const requestClose = useCallback(() => {
+    if (!application || closing) return;
+    setClosing(true);
+    closeTimer.current = window.setTimeout(() => { onClose(); setClosing(false); }, motionDuration(230));
+  }, [application, closing, onClose]);
+  useEscapeLayer(Boolean(application) && !closing, requestClose, 85);
+  if (!application) return null;
+  const routePath = application.routePath.endsWith('/') ? application.routePath : `${application.routePath}/`;
+  const url = `http://${application.routeHost}${routePath}`;
+  const progress = activeBuild?.progress || [];
+  const progressByStage = new Map(progress.map((event) => [event.stage, event]));
+  const completedCount = buildStages.filter((stage) => progressByStage.get(stage.id)?.state === 'succeeded').length;
+  const failedEvent = progress.find((event) => event.state === 'failed');
+  const progressPercent = activeBuild?.status === 'succeeded' ? 100 : activeBuild?.status === 'failed' ? Math.max(8, Math.round((completedCount / buildStages.length) * 100)) : Math.max(8, Math.round(((completedCount + (progress.some((event) => event.state === 'running') ? .5 : 0)) / buildStages.length) * 100));
+  return createPortal(<><button className={`drawer-scrim ${closing ? 'is-closing' : ''}`} aria-label="关闭应用详情" onClick={requestClose} /><aside className={`hosting-detail-drawer glass-panel ${closing ? 'is-closing' : ''}`} aria-label={`${application.name} 应用详情`}><header className="hosting-detail-drawer__header"><div className="resource-identity"><span className="resource-kind-icon"><Rocket size={21} /></span><div><small>{application.clusterId} · {application.namespace} · {application.buildMode}</small><h2>{application.name}</h2></div></div><IconButton label="关闭详情" onClick={requestClose}><X size={18} /></IconButton></header><div className="hosting-detail-drawer__body"><section className="application-detail__route"><ArrowUpRight size={18} /><div><strong>{application.routeHost}{application.routePath}</strong><small>Gateway: {application.gatewayNamespace}/{application.gatewayName}</small></div><StatusPill status={activeBuild?.status === 'succeeded' ? '已发布' : activeBuild?.status === 'running' ? '构建中' : activeBuild?.status === 'failed' ? '失败' : activeBuild?.status || '未部署'} /></section><section className="hosting-build-progress"><header><div><h3>构建进度</h3><p>{activeBuild?.message || '等待构建任务'}</p></div><span>{progressPercent}%</span></header><div className={`hosting-build-progress__bar ${failedEvent ? 'is-failed' : ''}`}><i style={{ width: `${progressPercent}%` }} /></div><ol className="hosting-build-progress__stages">{buildStages.map((stage, index) => { const event = progressByStage.get(stage.id); const state = event?.state || (failedEvent && index > buildStages.findIndex((item) => item.id === failedEvent.stage) ? 'pending' : 'pending'); return <li key={stage.id} className={`is-${state}`}><span>{state === 'succeeded' ? <Check size={12} /> : state === 'running' ? <LoaderCircle className="spin" size={12} /> : state === 'failed' ? <AlertTriangle size={12} /> : <Circle size={10} />}</span><strong>{stage.label}</strong></li>; })}</ol></section><section className="hosting-build-log"><header><h3>简要日志</h3>{activeBuild?.jenkinsBuildUrl && <a href={activeBuild.jenkinsBuildUrl} target="_blank" rel="noreferrer">Jenkins <ExternalLink size={13} /></a>}</header>{loading ? <div className="detail-loading"><LoaderCircle className="spin" size={17} />加载构建记录</div> : <div className="hosting-build-log__events">{progress.length ? progress.slice().reverse().map((event) => <div key={`${event.stage}:${event.createdAt}`} className={`is-${event.state}`}><span>{event.state === 'succeeded' ? <Check size={13} /> : event.state === 'running' ? <LoaderCircle className="spin" size={13} /> : <AlertTriangle size={13} />}</span><div><strong>{buildStages.find((stage) => stage.id === event.stage)?.label || event.stage}</strong><small>{event.message}</small></div><time>{formatDate(event.createdAt)}</time></div>) : <span className="muted-cell">尚无阶段事件</span>}</div>}</section><section className="application-webhook"><header><div><Link2 size={16} /><span><strong>GitLab 自动部署</strong><small>{application.autoDeploy ? '匹配的分支或 Tag push 会触发构建。' : '请先在编辑应用时启用自动部署。'}</small></span></div><Button variant="secondary" icon={<KeyRound size={15} />} onClick={() => void onConfigureWebhook(application)}>{application.webhookConfigured ? '轮换密钥' : '生成 Webhook'}</Button></header>{webhook && <div className="application-webhook__secret"><label><span>Webhook URL</span><code>{webhook.url}</code></label><label><span>Secret Token（仅展示一次）</span><code>{webhook.secret}</code></label></div>}</section><section className="hosting-build-history"><h3>构建历史</h3><div className="build-history">{builds.length ? builds.map((build) => <article key={build.id}><StatusPill status={build.status === 'succeeded' ? '成功' : build.status === 'running' ? '构建中' : build.status === 'failed' ? '失败' : build.status} /><div><strong>{build.gitCommit ? build.gitCommit.slice(0, 12) : build.gitRef}</strong><small>{build.message || '等待 Jenkins 回传状态'}</small></div><time>{formatDate(build.createdAt)}</time>{build.jenkinsBuildUrl && <a href={build.jenkinsBuildUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} /></a>}</article>) : <span className="muted-cell">尚无构建记录</span>}</div></section></div><footer className="hosting-detail-drawer__footer"><a className="button button--secondary" href={url} target="_blank" rel="noreferrer"><ExternalLink size={16} /><span>访问路由</span></a><Button variant="secondary" icon={<Settings2 size={16} />} onClick={() => onConfigureCompatibility(application)}>兼容性</Button><Button variant="secondary" icon={<RefreshCw size={16} />} onClick={() => onRedeploy(application)}>重新发布</Button><Button variant="primary" icon={<Rocket size={16} />} onClick={() => onDeploy(application)}>重新构建</Button></footer></aside></>, document.body);
 }

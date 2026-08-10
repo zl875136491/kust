@@ -152,6 +152,8 @@ pub struct ApplicationBuildDocument {
     pub image_digest_ref: Option<String>,
     pub message: Option<String>,
     #[serde(default)]
+    pub progress: Vec<ApplicationBuildProgressEvent>,
+    #[serde(default)]
     pub source_lease_token_hash: Option<String>,
     #[serde(default)]
     pub source_lease_expires_at: Option<DateTime>,
@@ -164,6 +166,15 @@ pub struct ApplicationBuildDocument {
     pub created_at: DateTime,
     pub started_at: Option<DateTime>,
     pub finished_at: Option<DateTime>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplicationBuildProgressEvent {
+    pub stage: String,
+    pub state: String,
+    pub message: String,
+    pub created_at: DateTime,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -218,6 +229,7 @@ pub struct ApplicationBuildResponse {
     pub image_ref: Option<String>,
     pub image_digest_ref: Option<String>,
     pub message: Option<String>,
+    pub progress: Vec<ApplicationBuildProgressResponse>,
     pub created_at: String,
     pub started_at: Option<String>,
     pub finished_at: Option<String>,
@@ -235,6 +247,11 @@ impl From<ApplicationBuildDocument> for ApplicationBuildResponse {
             image_ref: value.image_ref,
             image_digest_ref: value.image_digest_ref,
             message: value.message,
+            progress: value
+                .progress
+                .into_iter()
+                .map(ApplicationBuildProgressResponse::from)
+                .collect(),
             created_at: value.created_at.try_to_rfc3339_string().unwrap_or_default(),
             started_at: value
                 .started_at
@@ -242,6 +259,26 @@ impl From<ApplicationBuildDocument> for ApplicationBuildResponse {
             finished_at: value
                 .finished_at
                 .and_then(|value| value.try_to_rfc3339_string().ok()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplicationBuildProgressResponse {
+    pub stage: String,
+    pub state: String,
+    pub message: String,
+    pub created_at: String,
+}
+
+impl From<ApplicationBuildProgressEvent> for ApplicationBuildProgressResponse {
+    fn from(value: ApplicationBuildProgressEvent) -> Self {
+        Self {
+            stage: value.stage,
+            state: value.state,
+            message: value.message,
+            created_at: value.created_at.try_to_rfc3339_string().unwrap_or_default(),
         }
     }
 }
@@ -339,6 +376,8 @@ pub struct ApplicationBuildCallbackRequest {
     pub image_digest_ref: Option<String>,
     pub jenkins_build_url: Option<String>,
     pub message: Option<String>,
+    pub stage: Option<String>,
+    pub progress_state: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]

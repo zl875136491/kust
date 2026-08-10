@@ -50,8 +50,16 @@ callback_resolve="${KUST_CALLBACK_RESOLVE:-k8s.1oa.com.cn:80:10.17.158.71}"
 if [ -n "${callback_resolve}" ]; then
   resolve_args=(--resolve "${callback_resolve}")
 fi
+progress() {
+  local stage="$1" state="$2" message="$3"
+  local payload
+  payload="$(jq -n --arg status running --arg stage "${stage}" --arg progressState "${state}" --arg message "${message}" '{status:$status,stage:$stage,progressState:$progressState,message:$message}')"
+  curl --silent --show-error "${resolve_args[@]}" --header "X-Kust-Build-Token: ${KUST_CALLBACK_TOKEN}" --header "Content-Type: application/json" --data "${payload}" "${KUST_CALLBACK_URL}" || printf 'Unable to report Kust progress for %s.\n' "${stage}" >&2
+}
+progress source running "Jenkins is retrieving the protected source lease"
 curl --fail --silent --show-error "${resolve_args[@]}" --header "X-Kust-Build-Token: ${KUST_SOURCE_TOKEN}" "${KUST_CALLBACK_URL%/callback}/source" > source.json
 test -s source.json
+progress source succeeded "Source lease loaded"
 '''
       }
     }
@@ -60,6 +68,16 @@ test -s source.json
         sh '''#!/usr/bin/env bash
 set -Eeuo pipefail
 set +x
+resolve_args=()
+callback_resolve="${KUST_CALLBACK_RESOLVE:-k8s.1oa.com.cn:80:10.17.158.71}"
+[ -z "${callback_resolve}" ] || resolve_args=(--resolve "${callback_resolve}")
+progress() {
+  local stage="$1" state="$2" message="$3"
+  local payload
+  payload="$(jq -n --arg status running --arg stage "${stage}" --arg progressState "${state}" --arg message "${message}" '{status:$status,stage:$stage,progressState:$progressState,message:$message}')"
+  curl --silent --show-error "${resolve_args[@]}" --header "X-Kust-Build-Token: ${KUST_CALLBACK_TOKEN}" --header "Content-Type: application/json" --data "${payload}" "${KUST_CALLBACK_URL}" || printf 'Unable to report Kust progress for %s.\n' "${stage}" >&2
+}
+progress checkout running "Checking out the requested Git revision"
 repo="$(jq -r '.repositoryUrl' source.json)"
 ref="$(jq -r '.gitRef' source.json)"
 kind="$(jq -r '.credential.type // empty' source.json)"
@@ -96,6 +114,7 @@ cd ..
 unset secret KUST_GIT_SECRET GIT_ASKPASS GIT_TERMINAL_PROMPT GIT_SSH_COMMAND || true
 jq '{sourceSubdirectory, buildCommand, outputDirectory, buildEnvironment}' source.json > build-input.json
 rm -f source.json
+progress checkout succeeded "Git revision checked out"
 '''
       }
     }
@@ -103,6 +122,16 @@ rm -f source.json
       steps {
         sh '''#!/usr/bin/env bash
 set -Eeuo pipefail
+resolve_args=()
+callback_resolve="${KUST_CALLBACK_RESOLVE:-k8s.1oa.com.cn:80:10.17.158.71}"
+[ -z "${callback_resolve}" ] || resolve_args=(--resolve "${callback_resolve}")
+progress() {
+  local stage="$1" state="$2" message="$3"
+  local payload
+  payload="$(jq -n --arg status running --arg stage "${stage}" --arg progressState "${state}" --arg message "${message}" '{status:$status,stage:$stage,progressState:$progressState,message:$message}')"
+  curl --silent --show-error "${resolve_args[@]}" --header "X-Kust-Build-Token: ${KUST_CALLBACK_TOKEN}" --header "Content-Type: application/json" --data "${payload}" "${KUST_CALLBACK_URL}" || printf 'Unable to report Kust progress for %s.\n' "${stage}" >&2
+}
+progress build running "Building the application image"
 commit="$(cat git-commit.txt)"
 image="${IMAGE_REPOSITORY}:sha-${commit:0:12}"
 subdir="$(jq -r '.sourceSubdirectory // empty' build-input.json)"
@@ -195,6 +224,7 @@ EOF
   *) exit 2 ;;
 esac
 printf '%s' "${image}" > image-ref.txt
+progress build succeeded "Application image built successfully"
 '''
       }
     }
@@ -206,6 +236,16 @@ printf '%s' "${image}" > image-ref.txt
           sh '''#!/usr/bin/env bash
 set -Eeuo pipefail
 set +x
+resolve_args=()
+callback_resolve="${KUST_CALLBACK_RESOLVE:-k8s.1oa.com.cn:80:10.17.158.71}"
+[ -z "${callback_resolve}" ] || resolve_args=(--resolve "${callback_resolve}")
+progress() {
+  local stage="$1" state="$2" message="$3"
+  local payload
+  payload="$(jq -n --arg status running --arg stage "${stage}" --arg progressState "${state}" --arg message "${message}" '{status:$status,stage:$stage,progressState:$progressState,message:$message}')"
+  curl --silent --show-error "${resolve_args[@]}" --header "X-Kust-Build-Token: ${KUST_CALLBACK_TOKEN}" --header "Content-Type: application/json" --data "${payload}" "${KUST_CALLBACK_URL}" || printf 'Unable to report Kust progress for %s.\n' "${stage}" >&2
+}
+progress push running "Pushing the immutable image to Harbor"
 image="$(cat image-ref.txt)"
 commit="$(cat git-commit.txt)"
 config="$(mktemp -d)"
@@ -216,12 +256,7 @@ docker push "${image}" | tee push.log
 digest="$(awk '/digest: sha256:/{for (i = 1; i <= NF; i++) if ($i ~ /^sha256:/) {print $i; exit}}' push.log)"
 test -n "${digest}"
 digest_ref="${IMAGE_REPOSITORY}@${digest}"
-payload="$(jq -n --arg status succeeded --arg commit "${commit}" --arg image "${image}" --arg digest "${digest_ref}" --arg url "${BUILD_URL}" '{status:$status,gitCommit:$commit,imageRef:$image,imageDigestRef:$digest,jenkinsBuildUrl:$url,message:"Image pushed; Kust is applying controlled Kubernetes resources"}')"
-resolve_args=()
-callback_resolve="${KUST_CALLBACK_RESOLVE:-k8s.1oa.com.cn:80:10.17.158.71}"
-if [ -n "${callback_resolve}" ]; then
-  resolve_args=(--resolve "${callback_resolve}")
-fi
+payload="$(jq -n --arg status succeeded --arg stage push --arg progressState succeeded --arg commit "${commit}" --arg image "${image}" --arg digest "${digest_ref}" --arg url "${BUILD_URL}" '{status:$status,stage:$stage,progressState:$progressState,gitCommit:$commit,imageRef:$image,imageDigestRef:$digest,jenkinsBuildUrl:$url,message:"Image pushed; Kust is applying controlled Kubernetes resources"}')"
 curl --fail --silent --show-error "${resolve_args[@]}" --header "X-Kust-Build-Token: ${KUST_CALLBACK_TOKEN}" --header "Content-Type: application/json" --data "${payload}" "${KUST_CALLBACK_URL}"
 '''
         }
@@ -235,7 +270,7 @@ set +e
 if [ -z "${KUST_CALLBACK_URL:-}" ] || [ -z "${KUST_CALLBACK_TOKEN:-}" ]; then
   exit 0
 fi
-payload="$(jq -n --arg status failed --arg message "Jenkins build failed: ${BUILD_URL}" --arg url "${BUILD_URL}" '{status:$status,message:$message,jenkinsBuildUrl:$url}')"
+payload="$(jq -n --arg status failed --arg stage build --arg progressState failed --arg message "Jenkins build failed: ${BUILD_URL}" --arg url "${BUILD_URL}" '{status:$status,stage:$stage,progressState:$progressState,message:$message,jenkinsBuildUrl:$url}')"
 resolve_args=()
 callback_resolve="${KUST_CALLBACK_RESOLVE:-k8s.1oa.com.cn:80:10.17.158.71}"
 if [ -n "${callback_resolve}" ]; then

@@ -8,7 +8,7 @@ use axum::{
     Json,
 };
 use futures::{future::join_all, TryStreamExt};
-use mongodb::bson::{doc, oid::ObjectId, DateTime};
+use mongodb::bson::{doc, oid::ObjectId, to_bson, DateTime};
 use serde_json::json;
 use std::{collections::BTreeMap, net::IpAddr};
 use url::Url;
@@ -40,6 +40,54 @@ const UNCLAIMED_BUILD_GRACE_MILLIS: i64 = 15 * 60 * 1_000;
 // reclaiming a job that produced no immutable image or callback at all.
 const UNCALLED_BUILD_GRACE_MILLIS: i64 = 60 * 60 * 1_000;
 const UNFINISHED_ROLLOUT_GRACE_MILLIS: i64 = 45 * 60 * 1_000;
+
+const BUILD_PROGRESS_STAGES: &[&str] = &["queued", "source", "checkout", "build", "push", "deploy"];
+
+fn progress_event(
+    stage: &str,
+    state: &str,
+    message: impl Into<String>,
+) -> crate::models::ApplicationBuildProgressEvent {
+    crate::models::ApplicationBuildProgressEvent {
+        stage: stage.into(),
+        state: state.into(),
+        message: message.into(),
+        created_at: DateTime::now(),
+    }
+}
+
+fn update_build_progress(
+    build: &mut ApplicationBuildDocument,
+    stage: &str,
+    state: &str,
+    message: impl Into<String>,
+) {
+    let message = message.into();
+    if let Some(existing) = build.progress.iter_mut().find(|event| event.stage == stage) {
+        existing.state = state.into();
+        existing.message = message;
+        existing.created_at = DateTime::now();
+        return;
+    }
+    if state == "running" {
+        for event in &mut build.progress {
+            if event.state == "running" {
+                event.state = "succeeded".into();
+            }
+        }
+    }
+    build.progress.push(progress_event(stage, state, message));
+}
+
+fn validate_build_progress(stage: &str, state: &str) -> Result<(), AppError> {
+    if !BUILD_PROGRESS_STAGES.contains(&stage) {
+        return Err(AppError::bad_request("build progress stage is invalid"));
+    }
+    if !matches!(state, "running" | "succeeded" | "failed") {
+        return Err(AppError::bad_request("build progress state is invalid"));
+    }
+    Ok(())
+}
 
 pub fn router_routes(router: axum::Router<SharedState>) -> axum::Router<SharedState> {
     router
@@ -1928,6 +1976,11 @@ async fn redeploy_application(
         image_ref: previous.image_ref,
         image_digest_ref: Some(image.clone()),
         message: Some("Reapplying the latest immutable image with current runtime settings".into()),
+        progress: vec![progress_event(
+            "deploy",
+            "running",
+            "Reapplying the latest immutable image to Kubernetes",
+        )],
         source_lease_token_hash: None,
         source_lease_expires_at: None,
         source_lease_consumed_at: None,
@@ -1939,6 +1992,7 @@ async fn redeploy_application(
     };
     let id = build.id;
     state.application_builds.insert_one(&build).await?;
+    let progress_template = build.clone();
     let deployment_state = state.clone();
     let deployment_app = app.clone();
     let deployment_image = image.clone();
@@ -1956,11 +2010,22 @@ async fn redeploy_application(
             ),
             Err(error) => ("failed", format!("Kubernetes redeployment failed: {error}")),
         };
+        let mut completed = progress_template;
+        update_build_progress(
+            &mut completed,
+            "deploy",
+            if status == "succeeded" {
+                "succeeded"
+            } else {
+                "failed"
+            },
+            &message,
+        );
         if let Err(error) = deployment_state
             .application_builds
             .update_one(
                 doc! {"_id": id, "status": "running"},
-                doc! {"$set": {"status": status, "message": message, "finished_at": DateTime::now()}},
+                doc! {"$set": {"status": status, "message": message, "progress": to_bson(&completed.progress).unwrap_or_default(), "finished_at": DateTime::now()}},
             )
             .await
         {
@@ -2241,6 +2306,11 @@ async fn trigger_build(
         image_ref: None,
         image_digest_ref: None,
         message: None,
+        progress: vec![progress_event(
+            "queued",
+            "running",
+            "Build request accepted; waiting for Jenkins",
+        )],
         created_at: now,
         started_at: None,
         finished_at: None,
@@ -2346,6 +2416,18 @@ async fn trigger_build(
         ));
         result.status = "running".into();
         result.started_at = Some(DateTime::now());
+        update_build_progress(
+            &mut result,
+            "queued",
+            "succeeded",
+            "Jenkins accepted the build request",
+        );
+        update_build_progress(
+            &mut result,
+            "source",
+            "running",
+            "Waiting for Jenkins to claim the source lease",
+        );
         state
             .application_builds
             .replace_one(doc! {"_id": build_id}, &result)
@@ -2433,6 +2515,15 @@ async fn build_callback(
     ) {
         return Err(AppError::bad_request("build status is invalid"));
     }
+    if let (Some(stage), Some(progress_state)) =
+        (request.stage.as_deref(), request.progress_state.as_deref())
+    {
+        validate_build_progress(stage, progress_state)?;
+    } else if request.stage.is_some() || request.progress_state.is_some() {
+        return Err(AppError::bad_request(
+            "build progress requires both stage and state",
+        ));
+    }
     let id = parse_id(&build_id, "build id")?;
     let mut build = state
         .application_builds
@@ -2442,6 +2533,19 @@ async fn build_callback(
     require_build_callback_token(&build, &headers)?;
     if !matches!(build.status.as_str(), "queued" | "running") {
         return Err(AppError::conflict("build is already in a terminal state"));
+    }
+    if let (Some(stage), Some(progress_state)) =
+        (request.stage.as_deref(), request.progress_state.as_deref())
+    {
+        update_build_progress(
+            &mut build,
+            stage,
+            progress_state,
+            request
+                .message
+                .as_deref()
+                .unwrap_or("Jenkins reported build progress"),
+        );
     }
     if request.status == "succeeded" {
         let image = request
@@ -2478,6 +2582,18 @@ async fn build_callback(
         build.jenkins_build_url = request.jenkins_build_url.clone();
         build.message =
             Some("Image pushed; Kust is applying controlled Kubernetes resources".into());
+        update_build_progress(
+            &mut build,
+            "push",
+            "succeeded",
+            "Immutable image has been pushed to Harbor",
+        );
+        update_build_progress(
+            &mut build,
+            "deploy",
+            "running",
+            "Kust is applying the controlled Kubernetes resources",
+        );
         build.callback_token_hash = None;
         build.callback_token_expires_at = None;
         build.started_at.get_or_insert_with(DateTime::now);
@@ -2489,6 +2605,7 @@ async fn build_callback(
         let deployment_state = state.clone();
         let deployment_app = app.clone();
         let deployment_image = image.to_string();
+        let mut completed = build.clone();
         tokio::spawn(async move {
             let result = apply_and_verify_hosted_application(
                 &deployment_state,
@@ -2505,11 +2622,21 @@ async fn build_callback(
                 ),
                 Err(error) => ("failed", format!("Kubernetes deployment failed: {error}")),
             };
+            update_build_progress(
+                &mut completed,
+                "deploy",
+                if status == "succeeded" {
+                    "succeeded"
+                } else {
+                    "failed"
+                },
+                &message,
+            );
             if let Err(error) = deployment_state
                 .application_builds
                 .update_one(
                     doc! {"_id": id, "status": "running"},
-                    doc! {"$set": {"status": status, "message": message, "finished_at": DateTime::now()}},
+                    doc! {"$set": {"status": status, "message": message, "progress": to_bson(&completed.progress).unwrap_or_default(), "finished_at": DateTime::now()}},
                 )
                 .await
             {
@@ -2534,6 +2661,14 @@ async fn build_callback(
     build.image_digest_ref = request.image_digest_ref.clone();
     build.jenkins_build_url = request.jenkins_build_url;
     build.message = request.message;
+    if matches!(request.status.as_str(), "failed" | "cancelled") {
+        let stage = request.stage.as_deref().unwrap_or("build");
+        let failure_message = build
+            .message
+            .clone()
+            .unwrap_or_else(|| "Jenkins build did not complete".into());
+        update_build_progress(&mut build, stage, "failed", failure_message);
+    }
     if request.status == "running" {
         build.started_at = Some(DateTime::now());
     }
