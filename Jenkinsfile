@@ -11,7 +11,7 @@ pipeline {
 
     parameters {
         booleanParam(name: 'DEPLOY_TEST', defaultValue: true, description: 'Deploy the immutable image to /kust_test')
-        booleanParam(name: 'DEPLOY_PRODUCTION', defaultValue: true, description: 'Deploy the immutable image to /kust after test succeeds')
+        booleanParam(name: 'DEPLOY_PRODUCTION', defaultValue: false, description: 'Deploy the immutable image to /kust after test succeeds')
     }
 
     environment {
