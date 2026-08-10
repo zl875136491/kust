@@ -38,6 +38,7 @@ RUN mkdir src \
     && cargo build --release --locked \
     && rm -rf src
 COPY src ./src
+COPY agent ./agent
 RUN cargo clean --release -p kust-api \
     && cargo build --release --locked
 
