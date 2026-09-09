@@ -178,16 +178,20 @@ pub fn new_totp_secret() -> String {
 }
 
 pub fn verify_totp(secret: &str, code: &str) -> bool {
+    let unix_seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    verify_totp_at(secret, code, unix_seconds)
+}
+
+pub fn verify_totp_at(secret: &str, code: &str, unix_seconds: u64) -> bool {
     let code = code.trim();
     if code.len() != 6 || !code.bytes().all(|value| value.is_ascii_digit()) {
         return false;
     }
     let expected = code.parse::<u32>().unwrap_or(u32::MAX);
-    let step = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-        / 30;
+    let step = unix_seconds / 30;
     (-1_i64..=1).any(|offset| totp(secret, step.saturating_add_signed(offset)) == Some(expected))
 }
 
@@ -234,4 +238,54 @@ pub async fn require_admin(
         return Err(AppError::forbidden("administrator permission is required"));
     }
     Ok(auth)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{verify_totp_at, BASE32_NOPAD};
+
+    const RFC6238_SECRET: &str = "12345678901234567890";
+    const RFC6238_SECRET_BASE32: &str = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
+
+    #[test]
+    fn totp_matches_rfc6238_sha1_vectors() {
+        for (unix_seconds, expected) in [
+            (59, "287082"),
+            (1_111_111_109, "081804"),
+            (1_111_111_111, "050471"),
+            (1_234_567_890, "005924"),
+            (2_000_000_000, "279037"),
+            (20_000_000_000, "353130"),
+        ] {
+            assert!(verify_totp_at(
+                RFC6238_SECRET_BASE32,
+                expected,
+                unix_seconds
+            ));
+        }
+    }
+
+    #[test]
+    fn totp_accepts_adjacent_time_steps_but_rejects_invalid_input() {
+        let secret = BASE32_NOPAD.encode(RFC6238_SECRET.as_bytes());
+        let unix_seconds = 90;
+        let current = super::totp(&secret, unix_seconds / 30).unwrap();
+        let previous = super::totp(&secret, unix_seconds / 30 - 1).unwrap();
+        let next = super::totp(&secret, unix_seconds / 30 + 1).unwrap();
+
+        assert!(verify_totp_at(
+            &secret,
+            &format!("{current:06}"),
+            unix_seconds
+        ));
+        assert!(verify_totp_at(
+            &secret,
+            &format!("{previous:06}"),
+            unix_seconds
+        ));
+        assert!(verify_totp_at(&secret, &format!("{next:06}"), unix_seconds));
+        assert!(!verify_totp_at(&secret, "12345", unix_seconds));
+        assert!(!verify_totp_at(&secret, "12345a", unix_seconds));
+        assert!(!verify_totp_at("not-base32", "000000", unix_seconds));
+    }
 }
